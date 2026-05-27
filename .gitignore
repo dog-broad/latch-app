@@ -1,0 +1,30 @@
+# dependencies
+node_modules
+.pnpm-store
+
+# build output
+dist
+.vite
+.vercel
+
+# env (real values; .env.example is committed)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# editor / os
+.DS_Store
+Thumbs.db
+.idea
+.vscode/settings.json
+
+# logs
+*-debug.log*
+*-error.log*
+
+# test output
+coverage
+.nyc_output
+playwright-report
+test-results
