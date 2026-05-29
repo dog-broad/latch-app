@@ -155,16 +155,7 @@ function HeroClip({ clip }: { clip: Clip }) {
 
 function ClipBody({ clip }: { clip: Clip }) {
   if (clip.kind.type === 'url') {
-    return (
-      <a
-        href={clip.kind.href}
-        target="_blank"
-        rel="noopener noreferrer"
-        class="text-teal-bright text-14 font-mono break-all hover:text-teal-mid transition-colors"
-      >
-        {clip.text}
-      </a>
-    )
+    return <UrlBody href={clip.kind.href} text={clip.text} />
   }
   if (clip.kind.type === 'json') {
     return (
@@ -178,6 +169,35 @@ function ClipBody({ clip }: { clip: Clip }) {
   }
   return (
     <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono">{clip.text}</pre>
+  )
+}
+
+function UrlBody({ href, text }: { href: string; text: string }) {
+  // hostname extracted client-side — no outbound fetch for favicon
+  // or title, since that'd contradict the trust contract's
+  // exactly-two-outbound-categories rule.
+  let hostname: string
+  try {
+    hostname = new URL(href).hostname
+  } catch {
+    hostname = ''
+  }
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      class="block group transition-colors"
+    >
+      {hostname && (
+        <span class="block text-fg-faint text-12 font-mono mb-1 group-hover:text-teal-bright transition-colors">
+          {hostname}
+        </span>
+      )}
+      <span class="block text-teal-bright text-14 font-mono break-all group-hover:text-teal-mid transition-colors">
+        {text}
+      </span>
+    </a>
   )
 }
 
