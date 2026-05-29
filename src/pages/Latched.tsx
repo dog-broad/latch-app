@@ -5,6 +5,7 @@ import { getCurrentRoom } from '@/state/room'
 import { useRoomClips, type Clip } from '@/hooks/useRoomClips'
 import { encryptForRoom } from '@/crypto/client'
 import { publishClipToRoom } from '@/firebase/clips'
+import { highlightCode } from '@/clip/highlight'
 
 function formatTime(ts: number): string {
   const ageMs = Date.now() - ts
@@ -172,10 +173,46 @@ function ClipBody({ clip }: { clip: Clip }) {
       </pre>
     )
   }
-  // text and code render the raw text; syntax highlighting on code
-  // lands in a subsequent commit.
+  if (clip.kind.type === 'code') {
+    return <CodeBlock code={clip.text} language={clip.kind.language} />
+  }
   return (
     <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono">{clip.text}</pre>
+  )
+}
+
+function CodeBlock({ code, language }: { code: string; language: string | null }) {
+  const [html, setHtml] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const result = await highlightCode(code, language)
+        if (!cancelled) setHtml(result)
+      } catch {
+        // shiki failed or chunk fetch died; raw <pre> fallback keeps rendering
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [code, language])
+
+  if (!html) {
+    return (
+      <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono">{code}</pre>
+    )
+  }
+  return (
+    <div
+      class="shiki-host text-14 font-mono"
+      // shiki's html is a sanitized <pre><code>...</code></pre> tree —
+      // it does not include any user-controlled attributes that could
+      // execute scripts, and the input it formats is already trusted
+      // plaintext from the decrypt path.
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   )
 }
 

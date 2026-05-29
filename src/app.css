@@ -100,6 +100,20 @@ body {
   min-height: 100vh;
 }
 
+/* shiki output normalization. the syntax-highlighted block carries
+   its own background and padding from the github-dark theme;
+   stripping them lets the surrounding bg-bg-lifted card show through
+   and our own padding stay in charge of layout. wrapping rules
+   match the plain-text <pre> fallback so the swap is seamless. */
+.shiki-host .shiki {
+  background: transparent !important;
+  padding: 0 !important;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+  margin: 0;
+}
+
 /* hero-demo cipher strip. a 2.4 s linear sweep moves a teal-bright
    highlight across a teal-deep base — the visible "encryption
    happening here" cue between the plaintext and ciphertext boxes.
