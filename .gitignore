@@ -35,3 +35,7 @@ screenshots/
 *.screenshot.png
 page-*.png
 page-*.jpeg
+
+# lighthouse local reports
+lh-report.json
+lighthouse-report.*
