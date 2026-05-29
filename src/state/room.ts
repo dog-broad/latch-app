@@ -14,6 +14,9 @@ export type RoomState = {
   readonly name: string
   readonly keyId: number
   readonly roomPath: string
+  /** in-memory only — never persisted to localStorage. used by
+   *  "stay latched" to encrypt + stash before the tab drops it. */
+  readonly passphrase: string
 }
 
 let current: RoomState | null = null

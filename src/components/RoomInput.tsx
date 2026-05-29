@@ -47,7 +47,7 @@ export function RoomInput() {
     try {
       const salt = await deriveRoomSalt(roomName)
       const { keyId, roomPath } = await deriveRoomKey(passphraseText, salt)
-      setCurrentRoom({ name: roomName, keyId, roomPath })
+      setCurrentRoom({ name: roomName, keyId, roomPath, passphrase: passphraseText })
       route('/latched')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'failed to join room')

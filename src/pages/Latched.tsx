@@ -16,6 +16,14 @@ import {
 import { startClipboardWatch } from '@/clip/clipboard-watch'
 import { startClipboardPaste } from '@/clip/clipboard-paste'
 import { getToggles, setToggles, type AutoToggles } from '@/state/auto-toggles'
+import {
+  rememberRoom,
+  forgetRoom,
+  isRemembered,
+  touchRoom,
+} from '@/state/remembered-rooms'
+import { RoomSwitcher } from '@/components/RoomSwitcher'
+import { QrShow } from '@/components/QrShow'
 
 function formatTime(ts: number): string {
   const ageMs = Date.now() - ts
@@ -39,7 +47,7 @@ export function Latched() {
   }, [room, route])
 
   if (!room) return null
-  const { keyId, roomPath, name } = room
+  const { keyId, roomPath, name, passphrase } = room
 
   const clips = useRoomClips(keyId, roomPath)
   const newest = clips[0]
@@ -52,7 +60,34 @@ export function Latched() {
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [toggles, setLocalToggles] = useState<AutoToggles>(() => getToggles(roomPath))
+  const [stayLatched, setStayLatched] = useState(false)
   const recentlySeenRef = useRef<Set<string>>(new Set())
+
+  // hydrate "stay latched" status on mount + refresh lastSeenAt if remembered
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const remembered = await isRemembered(roomPath)
+      if (cancelled) return
+      setStayLatched(remembered)
+      if (remembered) void touchRoom(roomPath)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [roomPath])
+
+  async function flipStayLatched() {
+    const next = !stayLatched
+    setStayLatched(next)
+    try {
+      if (next) await rememberRoom(roomPath, name, passphrase)
+      else await forgetRoom(roomPath)
+    } catch (err) {
+      console.error('stay-latched persistence failed:', err)
+      setStayLatched(!next) // revert on error
+    }
+  }
 
   function markRecentlySeen(text: string): void {
     recentlySeenRef.current.add(text)
@@ -171,9 +206,9 @@ export function Latched() {
       <Header room={name} />
       <main class="flex-1 max-w-shell mx-auto w-full px-4 py-8 md:px-6 md:py-12">
         <article class="border border-border bg-bg-lifted rounded p-6 md:p-8">
-          <header class="flex items-center justify-between text-fg-muted text-12 gap-3">
+          <header class="flex flex-wrap items-center justify-between text-fg-muted text-12 gap-3">
             <span class="truncate">latched · {name}</span>
-            <div class="flex items-center gap-3 shrink-0">
+            <div class="flex flex-wrap items-center gap-3 shrink-0">
               <AutoToggle
                 enabled={toggles.autoWatch}
                 onClick={() => flipToggle('autoWatch')}
@@ -186,8 +221,18 @@ export function Latched() {
                 label="auto-copy"
                 tooltip="write the newest clip to your clipboard when this tab regains focus. needs clipboard write permission."
               />
+              <AutoToggle
+                enabled={stayLatched}
+                onClick={() => void flipStayLatched()}
+                label="stay latched"
+                tooltip="remember this room on this device. the passphrase is encrypted with a device-local key before it lands in indexeddb."
+              />
             </div>
           </header>
+          <div class="mt-3 flex items-center justify-end gap-4">
+            <QrShow roomName={name} passphrase={passphrase} />
+            <RoomSwitcher currentRoomPath={roomPath} />
+          </div>
           <div class="mt-8 md:mt-12 min-h-[6rem]">
             {newest ? <HeroClip clip={newest} keyId={keyId} /> : <EmptyState />}
           </div>
