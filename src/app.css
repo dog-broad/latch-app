@@ -59,6 +59,20 @@
   --text-56: 3.5rem;
   --text-64: 4rem;
 
+  /* font weights — only the three @fontsource declares are reachable.
+     keeps font-normal / font-medium / font-bold utilities alive after
+     the --font-* wipe. */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-bold: 700;
+
+  /* containers — landing copy at 680 px, app shell at 960 px,
+     long-prose subpages at 720 px. drives max-w-copy / max-w-shell /
+     max-w-prose utilities. */
+  --container-copy: 680px;
+  --container-shell: 960px;
+  --container-prose: 720px;
+
   /* geometry — sharp edges, minimal rounding. nothing above 4 px. */
   --radius: 2px;
   --radius-sharp: 0;
