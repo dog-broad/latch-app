@@ -3,43 +3,57 @@ import { useEffect, useState } from 'preact/hooks'
 const STRIP_BLOCK_CHARS = '░▒▓ ░ ▒'
 const STRIP_CELLS = 14
 const STRIP_TICK_MS = 140
+const DEFAULT_PLAINTEXT = 'hello world'
 
 /**
  * the landing-page centerpiece: a live encryption demo. left box
- * holds the plaintext, right box holds the ciphertext, transformation
- * strip in the middle visually carries the bytes across.
+ * holds the plaintext (editable), right box holds the actual
+ * aes-gcm-256 ciphertext of whatever the left box contains, in hex.
+ * the transformation strip between them shows a 2.4 s teal sweep
+ * with raf-paced block-glyph morph.
  *
- * the strip has a 2.4 s teal-glow sweep (driven from app.css) and a
- * raf-paced character morph: every ~140 ms the cells re-roll to a
- * new mix of block glyphs, so the strip looks "alive" even when the
- * user isn't typing. the box contents themselves are still
- * placeholders here — the reactive plaintext + real aes-gcm output
- * land in subsequent commits.
+ * the demo key is generated fresh per page-load via
+ * crypto.subtle.generateKey, non-extractable, never stored or
+ * displayed. the demonstration value lives in observable
+ * properties — same plaintext under different page-loads yields
+ * different ciphertext (random iv), identical lengths track input
+ * size + 16-byte gcm tag, and the page makes zero outbound requests
+ * during the demo (visible in devtools).
  */
 export function HeroDemo() {
+  const [plaintext, setPlaintext] = useState(DEFAULT_PLAINTEXT)
+  const ciphertext = useDemoCiphertext(plaintext)
+
   return (
     <div
       class="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-4 md:gap-0 items-stretch"
       aria-label="live encryption demo"
     >
-      <DemoBox
-        label="you type"
-        body={<span class="text-fg">hello world</span>}
-      />
+      <DemoBox label="you type">
+        <textarea
+          value={plaintext}
+          onInput={(e) => setPlaintext(e.currentTarget.value)}
+          aria-label="demo plaintext"
+          rows={3}
+          spellcheck={false}
+          class="w-full bg-transparent text-fg text-14 font-mono outline-none focus:ring-2 focus:ring-teal-mid focus:ring-inset resize-none placeholder:text-fg-faint"
+        />
+      </DemoBox>
       <CipherStrip />
-      <DemoBox
-        label="firebase stores"
-        body={<span class="text-fg-muted font-mono break-all">9a4f2c8e7b…</span>}
-      />
+      <DemoBox label="firebase stores">
+        <span class="text-fg-muted text-12 font-mono break-all">
+          {ciphertext || '…'}
+        </span>
+      </DemoBox>
     </div>
   )
 }
 
-function DemoBox({ label, body }: { label: string; body: preact.ComponentChildren }) {
+function DemoBox({ label, children }: { label: string; children: preact.ComponentChildren }) {
   return (
     <div class="border border-border bg-bg-sunk p-4 flex flex-col gap-3 min-h-32">
       <span class="text-fg-faint text-12">{label}</span>
-      <div class="flex-1 text-14 font-mono">{body}</div>
+      <div class="flex-1">{children}</div>
     </div>
   )
 }
@@ -79,4 +93,46 @@ function randomBlocks(n: number): string {
     s += ch
   }
   return s
+}
+
+/**
+ * fresh non-extractable aes-gcm-256 key per page-load; re-encrypts
+ * the plaintext (with a fresh random iv) every time it changes. the
+ * key never leaves memory and is never displayed. all native
+ * webcrypto — no library dependency on first paint.
+ */
+function useDemoCiphertext(plaintext: string): string {
+  const [hex, setHex] = useState('')
+  const [key, setKey] = useState<CryptoKey | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void crypto.subtle
+      .generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt'])
+      .then((k) => {
+        if (!cancelled) setKey(k)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!key) return
+    let cancelled = false
+    const iv = crypto.getRandomValues(new Uint8Array(12))
+    const data = new TextEncoder().encode(plaintext)
+    void crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data).then((buf) => {
+      if (cancelled) return
+      const bytes = new Uint8Array(buf)
+      let s = ''
+      for (const b of bytes) s += b.toString(16).padStart(2, '0')
+      setHex(s)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [plaintext, key])
+
+  return hex
 }
