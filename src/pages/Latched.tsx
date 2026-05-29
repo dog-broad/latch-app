@@ -1,8 +1,10 @@
-import { useEffect } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { useLocation } from 'preact-iso'
 import { Header } from '@/components/Header'
 import { getCurrentRoom } from '@/state/room'
 import { useRoomClips, type Clip } from '@/hooks/useRoomClips'
+import { encryptForRoom } from '@/crypto/client'
+import { publishClipToRoom } from '@/firebase/clips'
 
 function formatTime(ts: number): string {
   const ageMs = Date.now() - ts
@@ -33,18 +35,54 @@ export function Latched() {
   }, [room, route])
 
   if (!room) return null
+  const { keyId, roomPath, name } = room
 
-  const clips = useRoomClips(room.keyId, room.roomPath)
+  const clips = useRoomClips(keyId, roomPath)
   const newest = clips[0]
   const earlier = clips.slice(1)
 
+  const [draft, setDraft] = useState('')
+  const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
+
+  async function send() {
+    const text = draft.trim()
+    if (!text || sending) return
+    setSending(true)
+    setSendError(null)
+    try {
+      const plaintext = new TextEncoder().encode(text)
+      const payload = await encryptForRoom(keyId, plaintext)
+      await publishClipToRoom(roomPath, payload)
+      setDraft('')
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'failed to send')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  function handleSubmit(e: Event) {
+    e.preventDefault()
+    void send()
+  }
+
+  function handleKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      void send()
+    }
+  }
+
+  const canSend = draft.trim().length > 0 && !sending
+
   return (
     <div class="min-h-screen flex flex-col bg-bg text-fg">
-      <Header room={room.name} />
+      <Header room={name} />
       <main class="flex-1 max-w-shell mx-auto w-full px-4 py-8 md:px-6 md:py-12">
         <article class="border border-border bg-bg-lifted rounded p-6 md:p-8">
           <header class="flex items-center justify-between text-fg-muted text-12">
-            <span>latched · {room.name}</span>
+            <span>latched · {name}</span>
             <span aria-label="auto-copy off">auto-copy ◯</span>
           </header>
           <div class="mt-8 md:mt-12 min-h-[6rem]">
@@ -63,19 +101,26 @@ export function Latched() {
           </section>
         )}
 
-        <form class="mt-12" onSubmit={(e) => e.preventDefault()}>
+        <form class="mt-12" onSubmit={handleSubmit}>
           <div class="border border-border rounded bg-bg-sunk">
             <textarea
               placeholder="paste · drop · type · ⌘↵ to send"
               aria-label="new clip"
               rows={4}
               spellcheck={false}
-              class="w-full bg-transparent text-fg text-14 placeholder:text-fg-faint p-4 outline-none focus:ring-2 focus:ring-teal-mid focus:ring-inset resize-none"
+              value={draft}
+              onInput={(e) => setDraft(e.currentTarget.value)}
+              onKeyDown={handleKeyDown}
+              disabled={sending}
+              class="w-full bg-transparent text-fg text-14 placeholder:text-fg-faint p-4 outline-none focus:ring-2 focus:ring-teal-mid focus:ring-inset resize-none disabled:opacity-50"
             />
-            <div class="flex items-center justify-end border-t border-border px-4 py-2">
+            <div class="flex items-center justify-between border-t border-border px-4 py-2">
+              <span class="text-fg-muted text-12" role={sendError ? 'alert' : undefined}>
+                {sendError ?? ''}
+              </span>
               <button
                 type="submit"
-                disabled
+                disabled={!canSend}
                 aria-label="send clip"
                 class="bg-teal-mid text-bg text-14 font-medium px-4 py-2 rounded hover:bg-teal-bright transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-teal-mid"
               >
