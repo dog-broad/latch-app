@@ -128,3 +128,16 @@ body {
   background-repeat: no-repeat;
   animation: glow-sweep 2.4s linear infinite;
 }
+
+/* operator opted out of motion. replace the animated sweep with a
+   flat teal-mid fill and let the static glyph row in the strip stand
+   in for the cycling one — the demo's reactive bits (typing in the
+   plaintext box updates the ciphertext) remain, since content updates
+   aren't decorative motion. */
+@media (prefers-reduced-motion: reduce) {
+  .cipher-strip {
+    animation: none;
+    background-image: none;
+    background-color: var(--color-teal-mid);
+  }
+}

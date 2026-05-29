@@ -4,6 +4,11 @@ const STRIP_BLOCK_CHARS = '░▒▓ ░ ▒'
 const STRIP_CELLS = 14
 const STRIP_TICK_MS = 140
 const DEFAULT_PLAINTEXT = 'hello world'
+const STATIC_BLOCKS = '░▒░▓░ ▒▓░▒▓░ '
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
 
 /**
  * the landing-page centerpiece: a live encryption demo. left box
@@ -59,9 +64,13 @@ function DemoBox({ label, children }: { label: string; children: preact.Componen
 }
 
 function CipherStrip() {
-  const [blocks, setBlocks] = useState(() => randomBlocks(STRIP_CELLS))
+  const reduced = prefersReducedMotion()
+  const [blocks, setBlocks] = useState(() =>
+    reduced ? STATIC_BLOCKS.slice(0, STRIP_CELLS) : randomBlocks(STRIP_CELLS),
+  )
 
   useEffect(() => {
+    if (reduced) return
     let raf = 0
     let last = 0
     function tick(now: number) {
@@ -73,7 +82,7 @@ function CipherStrip() {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [])
+  }, [reduced])
 
   return (
     <div
