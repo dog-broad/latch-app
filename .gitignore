@@ -28,3 +28,14 @@ coverage
 .nyc_output
 playwright-report
 test-results
+
+# browser-tool artifacts (mcp screenshots, snapshots, console logs)
+.playwright-mcp
+screenshots/
+*.screenshot.png
+page-*.png
+page-*.jpeg
+
+# lighthouse local reports
+lh-report.json
+lighthouse-report.*
