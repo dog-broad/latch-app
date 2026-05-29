@@ -43,20 +43,51 @@ function getWorker(): Worker {
   return worker
 }
 
-function request(req: Omit<CryptoRequest, 'id'>): Promise<CryptoResponse> {
+/**
+ * post a `(kind, payload)` to the worker and return the per-kind narrowed
+ * response. taking kind and payload separately (vs `Omit<CryptoRequest,
+ * 'id'>`) sidesteps the well-known ts gotcha that `Omit` doesn't
+ * distribute across discriminated unions — `Omit<...>` would collapse
+ * to the intersection of fields and drop everything kind-specific.
+ */
+function request<K extends CryptoRequest['kind']>(
+  kind: K,
+  payload: Omit<Extract<CryptoRequest, { kind: K }>, 'kind' | 'id'>,
+): Promise<Extract<CryptoResponse, { kind: K }>> {
   const w = getWorker()
   const id = nextId++
-  return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject })
-    w.postMessage({ ...req, id } as CryptoRequest)
+  return new Promise<Extract<CryptoResponse, { kind: K }>>((resolve, reject) => {
+    pending.set(id, {
+      resolve: (response) => resolve(response as Extract<CryptoResponse, { kind: K }>),
+      reject,
+    })
+    w.postMessage({ kind, id, ...payload } as CryptoRequest)
   })
 }
 
 /** smoke-test the worker channel. resolves with the worker's clock at
  *  the moment it handled the request. */
 export async function ping(): Promise<{ ts: number }> {
-  const res = await request({ kind: 'ping' })
-  if (res.kind !== 'ping') throw new Error('protocol mismatch: expected ping response')
+  const res = await request('ping', {})
+  if (!res.ok) throw new Error(res.error.message)
+  return res.result
+}
+
+/**
+ * derive 32 bytes of argon2id key material for a room from the user's
+ * passphrase and the room's salt. the raw bytes stay inside the worker —
+ * the returned `keyId` is an opaque handle that later operations
+ * (hkdf split, encrypt, decrypt) use to reach the stored material.
+ *
+ * argon2id parameters live on the worker side so the cost calibration
+ * is one place to tune; the client only carries the inputs. first call
+ * lazy-loads hash-wasm — first paint never pays.
+ */
+export async function deriveRoomKey(
+  passphrase: string,
+  salt: Uint8Array,
+): Promise<{ keyId: number; durationMs: number }> {
+  const res = await request('derive', { passphrase, salt })
   if (!res.ok) throw new Error(res.error.message)
   return res.result
 }
