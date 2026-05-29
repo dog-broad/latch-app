@@ -2,18 +2,24 @@ import { useEffect } from 'preact/hooks'
 import { useLocation } from 'preact-iso'
 import { Header } from '@/components/Header'
 import { getCurrentRoom } from '@/state/room'
+import { useRoomClips, type Clip } from '@/hooks/useRoomClips'
+
+function formatTime(ts: number): string {
+  const ageMs = Date.now() - ts
+  if (ageMs < 60_000) return 'just now'
+  const d = new Date(ts)
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+}
 
 /**
  * the app shell once a room is joined. structure follows the §6.2
  * mock: header with the room name, a hero card for the newest clip,
  * an "earlier" list of one-liners below, and a composer at the foot.
  *
- * this commit lays the surface. the hero card sits empty (the voice
- * sample "no clips yet. paste anything." occupies the body until
- * firebase subscriptions land). the earlier list is absent while
- * there's nothing to list. the composer renders a textarea + send
- * button but the submit pipeline (encrypt-then-write) lands in a
- * subsequent commit.
+ * clips arrive via useRoomClips, which lazy-loads firebase auth +
+ * database the first time this view mounts. the composer is still
+ * non-functional in this commit — the encrypt-then-publish pipeline
+ * lands separately.
  *
  * unauthenticated landing: visiting /latched without a current room
  * routes back to / on mount.
@@ -28,6 +34,10 @@ export function Latched() {
 
   if (!room) return null
 
+  const clips = useRoomClips(room.keyId, room.roomPath)
+  const newest = clips[0]
+  const earlier = clips.slice(1)
+
   return (
     <div class="min-h-screen flex flex-col bg-bg text-fg">
       <Header room={room.name} />
@@ -38,9 +48,20 @@ export function Latched() {
             <span aria-label="auto-copy off">auto-copy ◯</span>
           </header>
           <div class="mt-8 md:mt-12 min-h-[6rem]">
-            <p class="text-fg-faint text-14">no clips yet. paste anything.</p>
+            {newest ? <HeroClip clip={newest} /> : <EmptyState />}
           </div>
         </article>
+
+        {earlier.length > 0 && (
+          <section class="mt-12">
+            <h2 class="text-fg-muted text-12">earlier ────</h2>
+            <ul class="mt-4 space-y-2">
+              {earlier.map((c) => (
+                <EarlierClip key={c.id} clip={c} />
+              ))}
+            </ul>
+          </section>
+        )}
 
         <form class="mt-12" onSubmit={(e) => e.preventDefault()}>
           <div class="border border-border rounded bg-bg-sunk">
@@ -65,5 +86,30 @@ export function Latched() {
         </form>
       </main>
     </div>
+  )
+}
+
+function EmptyState() {
+  return <p class="text-fg-faint text-14">no clips yet. paste anything.</p>
+}
+
+function HeroClip({ clip }: { clip: Clip }) {
+  return (
+    <>
+      <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono">{clip.text}</pre>
+      <div class="mt-6 flex items-center gap-3 text-fg-muted text-12">
+        <span aria-hidden="true">────</span>
+        <span>{formatTime(clip.ts)}</span>
+      </div>
+    </>
+  )
+}
+
+function EarlierClip({ clip }: { clip: Clip }) {
+  return (
+    <li class="flex items-baseline gap-3 text-14">
+      <span class="text-fg-muted text-12 shrink-0">{formatTime(clip.ts)}</span>
+      <span class="text-fg truncate font-mono">{clip.text}</span>
+    </li>
   )
 }
