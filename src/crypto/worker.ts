@@ -28,6 +28,12 @@ async function handle(req: CryptoRequest): Promise<CryptoResponse> {
   if (req.kind === 'derive') {
     return derive(req)
   }
+  if (req.kind === 'encrypt') {
+    return encrypt(req)
+  }
+  if (req.kind === 'decrypt') {
+    return decrypt(req)
+  }
   // exhaustiveness guard — a new request kind added to CryptoRequest
   // without a branch above becomes a never-assignment compile error.
   const _exhaustive: never = req
@@ -130,4 +136,97 @@ async function hkdfSplit(ikmBytes: Uint8Array): Promise<RoomMaterial> {
 
 function toHex(buffer: ArrayBuffer): string {
   return Array.from(new Uint8Array(buffer), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * aes-gcm-256 encrypt against the stored roomKey for `keyId`. wire
+ * format is the 12-byte iv prepended to the ciphertext+tag; one buffer,
+ * one postMessage. per-message random iv is the nonce-misuse rule made
+ * explicit — never reuse an iv under the same key. aad (when present)
+ * is authenticated but not encrypted; the file path will pass the
+ * chunk index there so reorderings get rejected on decrypt.
+ */
+async function encrypt(
+  req: Extract<CryptoRequest, { kind: 'encrypt' }>,
+): Promise<CryptoResponse> {
+  const material = keyMaterial.get(req.keyId)
+  if (!material) {
+    return {
+      kind: 'encrypt',
+      id: req.id,
+      ok: false,
+      error: { message: 'unknown keyId' },
+    }
+  }
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const params: AesGcmParams = req.aad
+    ? { name: 'AES-GCM', iv, additionalData: new Uint8Array(req.aad) }
+    : { name: 'AES-GCM', iv }
+  const plaintextCopy = new Uint8Array(req.plaintext)
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt(params, material.roomKey, plaintextCopy),
+  )
+  const payload = new Uint8Array(iv.length + ciphertext.length)
+  payload.set(iv, 0)
+  payload.set(ciphertext, iv.length)
+  return {
+    kind: 'encrypt',
+    id: req.id,
+    ok: true,
+    result: { payload },
+  }
+}
+
+/**
+ * aes-gcm-256 decrypt. webcrypto throws on tag-check failure — that
+ * surface is collapsed to a single opaque "decryption failed" error so
+ * callers can't distinguish tamper from aad mismatch from mitm
+ * substitution. the payload's first 12 bytes are the iv; everything
+ * after is ciphertext+tag.
+ */
+async function decrypt(
+  req: Extract<CryptoRequest, { kind: 'decrypt' }>,
+): Promise<CryptoResponse> {
+  const material = keyMaterial.get(req.keyId)
+  if (!material) {
+    return {
+      kind: 'decrypt',
+      id: req.id,
+      ok: false,
+      error: { message: 'unknown keyId' },
+    }
+  }
+  // 12-byte iv + 16-byte gcm tag is the floor; smaller can't be a
+  // well-formed payload regardless of plaintext length.
+  if (req.payload.length < 12 + 16) {
+    return {
+      kind: 'decrypt',
+      id: req.id,
+      ok: false,
+      error: { message: 'payload too short' },
+    }
+  }
+  const iv = new Uint8Array(req.payload.slice(0, 12))
+  const ciphertext = new Uint8Array(req.payload.slice(12))
+  const params: AesGcmParams = req.aad
+    ? { name: 'AES-GCM', iv, additionalData: new Uint8Array(req.aad) }
+    : { name: 'AES-GCM', iv }
+  try {
+    const plaintext = new Uint8Array(
+      await crypto.subtle.decrypt(params, material.roomKey, ciphertext),
+    )
+    return {
+      kind: 'decrypt',
+      id: req.id,
+      ok: true,
+      result: { plaintext },
+    }
+  } catch {
+    return {
+      kind: 'decrypt',
+      id: req.id,
+      ok: false,
+      error: { message: 'decryption failed' },
+    }
+  }
 }

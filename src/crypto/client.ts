@@ -93,3 +93,45 @@ export async function deriveRoomKey(
   if (!res.ok) throw new Error(res.error.message)
   return res.result
 }
+
+/**
+ * aes-gcm-256 encrypt the plaintext against the room key referenced
+ * by `keyId`. returns iv || ciphertext+tag as a single buffer — the
+ * 12-byte iv lives at the front of the payload, the receiver pulls
+ * it back off in decryptForRoom. iv is fresh-random per call; never
+ * reuse a payload under the same key.
+ *
+ * `aad` is authenticated but not encrypted. text clips don't need
+ * one; the file-chunk path will pass the chunk index so reordering
+ * gets rejected on decrypt.
+ *
+ * the raw aes-gcm key never crosses the boundary — only the keyId
+ * handle does. text-vs-file serialization lives at the call site
+ * via TextEncoder/TextDecoder; this layer is binary-agnostic.
+ */
+export async function encryptForRoom(
+  keyId: number,
+  plaintext: Uint8Array,
+  aad?: Uint8Array,
+): Promise<Uint8Array> {
+  const res = await request('encrypt', aad ? { keyId, plaintext, aad } : { keyId, plaintext })
+  if (!res.ok) throw new Error(res.error.message)
+  return res.result.payload
+}
+
+/**
+ * aes-gcm-256 decrypt of an iv-prefixed payload against the room
+ * key referenced by `keyId`. authentication failures (tampered
+ * payload, wrong aad, wrong key) all surface as the same opaque
+ * error so callers can't distinguish them — the decision to keep
+ * webcrypto's tag-check failure mode opaque lives on the worker side.
+ */
+export async function decryptForRoom(
+  keyId: number,
+  payload: Uint8Array,
+  aad?: Uint8Array,
+): Promise<Uint8Array> {
+  const res = await request('decrypt', aad ? { keyId, payload, aad } : { keyId, payload })
+  if (!res.ok) throw new Error(res.error.message)
+  return res.result.plaintext
+}

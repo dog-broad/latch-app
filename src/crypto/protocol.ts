@@ -14,12 +14,18 @@
 export type CryptoRequest =
   | { kind: 'ping'; id: number }
   | { kind: 'derive'; id: number; passphrase: string; salt: Uint8Array }
+  | { kind: 'encrypt'; id: number; keyId: number; plaintext: Uint8Array; aad?: Uint8Array }
+  | { kind: 'decrypt'; id: number; keyId: number; payload: Uint8Array; aad?: Uint8Array }
 
 export type CryptoResponse =
   | { kind: 'ping'; id: number; ok: true; result: { ts: number } }
   | { kind: 'ping'; id: number; ok: false; error: CryptoError }
   | { kind: 'derive'; id: number; ok: true; result: DeriveResult }
   | { kind: 'derive'; id: number; ok: false; error: CryptoError }
+  | { kind: 'encrypt'; id: number; ok: true; result: { payload: Uint8Array } }
+  | { kind: 'encrypt'; id: number; ok: false; error: CryptoError }
+  | { kind: 'decrypt'; id: number; ok: true; result: { plaintext: Uint8Array } }
+  | { kind: 'decrypt'; id: number; ok: false; error: CryptoError }
 
 /**
  * `keyId` is an opaque handle into the worker's local key-material store;
