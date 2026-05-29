@@ -23,13 +23,18 @@ export type CryptoResponse =
 
 /**
  * `keyId` is an opaque handle into the worker's local key-material store;
- * the 32-byte argon2id output stays inside the worker and is referenced
- * by handle from future operations (hkdf split, encrypt, decrypt). a
- * later commit extends this shape with `roomPath` once hkdf domain
- * separation lands.
+ * the underlying aes-gcm `CryptoKey` is non-extractable and stays inside
+ * the worker — future operations (encrypt, decrypt) reach it by handle.
+ *
+ * `roomPath` is the 16-hex firebase path for the room. it's derived
+ * from a domain-separated hkdf branch off the same key material as the
+ * content key, so two rooms with the same name and different
+ * passphrases land at different paths and never cross-talk. firebase
+ * never sees the room name itself — only this opaque hash.
  */
 export type DeriveResult = {
   readonly keyId: number
+  readonly roomPath: string
   readonly durationMs: number
 }
 

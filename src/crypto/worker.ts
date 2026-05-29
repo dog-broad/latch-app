@@ -37,11 +37,21 @@ async function handle(req: CryptoRequest): Promise<CryptoResponse> {
 // argon2id is lazy-imported on first derive so the wasm module never
 // loads on first paint — the landing page sees it only when a user
 // joins a room. derived material stays in `keyMaterial`, indexed by
-// an opaque handle; nothing re-exports the raw bytes across the
-// worker boundary.
+// an opaque handle; the aes-gcm key is non-extractable and the raw
+// argon2id output is discarded once hkdf has split it.
 let argon2id: typeof Argon2idFn | null = null
 let nextKeyId = 1
-const keyMaterial = new Map<number, Uint8Array>()
+
+type RoomMaterial = {
+  readonly roomKey: CryptoKey
+  readonly roomPath: string
+}
+const keyMaterial = new Map<number, RoomMaterial>()
+
+const encoder = new TextEncoder()
+const HKDF_INFO_ROOM_KEY = encoder.encode('latch-room-key-v1')
+const HKDF_INFO_ROOM_PATH = encoder.encode('latch-room-path-v1')
+const EMPTY_SALT = new Uint8Array(0)
 
 async function derive(
   req: Extract<CryptoRequest, { kind: 'derive' }>,
@@ -50,12 +60,12 @@ async function derive(
     argon2id = (await import('hash-wasm')).argon2id
   }
   const t0 = performance.now()
-  // 64 MiB memory, 3 iterations, 4 parallelism, 32-byte output.
-  // memory-hard against gpu brute force — passphrases are low-entropy
-  // by default, and the cost-per-guess shape of argon2id is what raises
-  // online brute force above worthwhile. calibrated at these settings
-  // to roughly 500 ms on a mid-range laptop.
-  const hash = await argon2id({
+  // argon2id parameters: 64 MiB memory, 3 iterations, 4 parallelism,
+  // 32-byte output. memory-hard against gpu brute force — passphrases
+  // are low-entropy by default, and the cost-per-guess shape of
+  // argon2id is what raises online brute force above worthwhile.
+  // calibrated at these settings to roughly 500 ms on a mid-range laptop.
+  const argonOutput = await argon2id({
     password: req.passphrase,
     salt: req.salt,
     iterations: 3,
@@ -64,13 +74,60 @@ async function derive(
     hashLength: 32,
     outputType: 'binary',
   })
+  const { roomKey, roomPath } = await hkdfSplit(argonOutput)
+  // discard the raw 32-byte argon2id output — neither aes-gcm nor the
+  // path needs it again, and leaving it in scope is needless lifetime
+  // for sensitive material.
+  argonOutput.fill(0)
   const durationMs = performance.now() - t0
   const keyId = nextKeyId++
-  keyMaterial.set(keyId, hash)
+  keyMaterial.set(keyId, { roomKey, roomPath })
   return {
     kind: 'derive',
     id: req.id,
     ok: true,
-    result: { keyId, durationMs },
+    result: { keyId, roomPath, durationMs },
   }
+}
+
+/**
+ * split the argon2id output into two domain-separated branches via
+ * hkdf-sha256. the same input key material produces:
+ *   - `roomKey`: a non-extractable aes-gcm-256 CryptoKey used for content
+ *     encryption. never leaves the worker.
+ *   - `roomPath`: 64 bits expressed as 16 lowercase hex chars, used as
+ *     the firebase database path so the server only ever sees a hash,
+ *     never the room name the user typed.
+ * different `info` labels are the domain separation — anyone with the
+ * path can't derive the content key, and vice versa.
+ */
+async function hkdfSplit(ikmBytes: Uint8Array): Promise<RoomMaterial> {
+  // copy into a plain ArrayBuffer-backed view — webcrypto's BufferSource
+  // excludes SharedArrayBuffer-backed views, and hash-wasm types its
+  // output generically. the copy is 32 bytes; negligible.
+  const ikmCopy = new Uint8Array(ikmBytes)
+  const ikm = await crypto.subtle.importKey(
+    'raw',
+    ikmCopy,
+    'HKDF',
+    false,
+    ['deriveBits', 'deriveKey'],
+  )
+  const roomKey = await crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: EMPTY_SALT, info: HKDF_INFO_ROOM_KEY },
+    ikm,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  )
+  const pathBits = await crypto.subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt: EMPTY_SALT, info: HKDF_INFO_ROOM_PATH },
+    ikm,
+    64,
+  )
+  return { roomKey, roomPath: toHex(pathBits) }
+}
+
+function toHex(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer), (b) => b.toString(16).padStart(2, '0')).join('')
 }

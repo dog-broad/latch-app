@@ -74,19 +74,21 @@ export async function ping(): Promise<{ ts: number }> {
 }
 
 /**
- * derive 32 bytes of argon2id key material for a room from the user's
- * passphrase and the room's salt. the raw bytes stay inside the worker —
- * the returned `keyId` is an opaque handle that later operations
- * (hkdf split, encrypt, decrypt) use to reach the stored material.
+ * derive a room's content key and firebase path from the user's
+ * passphrase and a per-room salt. the chain is argon2id → hkdf-split:
+ *   - argon2id raises cost per guess for low-entropy passphrases
+ *   - hkdf splits that output into two domain-separated branches
  *
- * argon2id parameters live on the worker side so the cost calibration
- * is one place to tune; the client only carries the inputs. first call
+ * the aes-gcm content key (`roomKey`, non-extractable) stays inside
+ * the worker; the client receives only the opaque `keyId` handle and
+ * the 16-hex `roomPath` for firebase. the cost calibration lives on
+ * the worker side so the client carries only the inputs. first call
  * lazy-loads hash-wasm — first paint never pays.
  */
 export async function deriveRoomKey(
   passphrase: string,
   salt: Uint8Array,
-): Promise<{ keyId: number; durationMs: number }> {
+): Promise<{ keyId: number; roomPath: string; durationMs: number }> {
   const res = await request('derive', { passphrase, salt })
   if (!res.ok) throw new Error(res.error.message)
   return res.result
