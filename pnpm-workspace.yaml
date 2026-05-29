@@ -2,4 +2,6 @@
 # repo. Postinstall scripts run only for explicitly-allowed packages; anything
 # new added to the dep tree gets blocked until reviewed.
 allowBuilds:
+  '@firebase/util': true
   esbuild: true
+  protobufjs: true
