@@ -13,6 +13,9 @@ import {
   MAX_FILE_BYTES,
   type UploadProgress,
 } from '@/clip/file-pipeline'
+import { startClipboardWatch } from '@/clip/clipboard-watch'
+import { startClipboardPaste } from '@/clip/clipboard-paste'
+import { getToggles, setToggles, type AutoToggles } from '@/state/auto-toggles'
 
 function formatTime(ts: number): string {
   const ageMs = Date.now() - ts
@@ -48,6 +51,43 @@ export function Latched() {
   const [upload, setUpload] = useState<UploadProgress | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [toggles, setLocalToggles] = useState<AutoToggles>(() => getToggles(roomPath))
+  const recentlySeenRef = useRef<Set<string>>(new Set())
+
+  function markRecentlySeen(text: string): void {
+    recentlySeenRef.current.add(text)
+    window.setTimeout(() => recentlySeenRef.current.delete(text), 10_000)
+  }
+
+  // remember every text clip that arrives so auto-watch doesn't echo
+  // it back at the OS clipboard layer (or vice versa for auto-copy).
+  useEffect(() => {
+    for (const c of clips) {
+      if (c.type === 'text') markRecentlySeen(c.text.trim())
+    }
+  }, [clips])
+
+  useEffect(() => {
+    if (!toggles.autoWatch) return
+    return startClipboardWatch(roomPath, keyId, (t) => recentlySeenRef.current.has(t))
+  }, [toggles.autoWatch, keyId, roomPath])
+
+  useEffect(() => {
+    if (!toggles.autoCopy) return
+    return startClipboardPaste(
+      () => {
+        const latest = clips.find((c): c is TextClip => c.type === 'text')
+        return latest?.text ?? null
+      },
+      markRecentlySeen,
+    )
+  }, [toggles.autoCopy, clips])
+
+  function flipToggle(key: keyof AutoToggles): void {
+    const next: AutoToggles = { ...toggles, [key]: !toggles[key] }
+    setLocalToggles(next)
+    setToggles(roomPath, next)
+  }
 
   async function sendText() {
     const text = draft.trim()
@@ -131,9 +171,22 @@ export function Latched() {
       <Header room={name} />
       <main class="flex-1 max-w-shell mx-auto w-full px-4 py-8 md:px-6 md:py-12">
         <article class="border border-border bg-bg-lifted rounded p-6 md:p-8">
-          <header class="flex items-center justify-between text-fg-muted text-12">
-            <span>latched · {name}</span>
-            <span aria-label="auto-copy off">auto-copy ◯</span>
+          <header class="flex items-center justify-between text-fg-muted text-12 gap-3">
+            <span class="truncate">latched · {name}</span>
+            <div class="flex items-center gap-3 shrink-0">
+              <AutoToggle
+                enabled={toggles.autoWatch}
+                onClick={() => flipToggle('autoWatch')}
+                label="auto-watch"
+                tooltip="poll your clipboard and auto-send new copies to the room. needs clipboard read permission."
+              />
+              <AutoToggle
+                enabled={toggles.autoCopy}
+                onClick={() => flipToggle('autoCopy')}
+                label="auto-copy"
+                tooltip="write the newest clip to your clipboard when this tab regains focus. needs clipboard write permission."
+              />
+            </div>
           </header>
           <div class="mt-8 md:mt-12 min-h-[6rem]">
             {newest ? <HeroClip clip={newest} keyId={keyId} /> : <EmptyState />}
@@ -231,6 +284,33 @@ export function Latched() {
 
 function EmptyState() {
   return <p class="text-fg-faint text-14">no clips yet. paste anything.</p>
+}
+
+function AutoToggle({
+  enabled,
+  onClick,
+  label,
+  tooltip,
+}: {
+  enabled: boolean
+  onClick: () => void
+  label: string
+  tooltip: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={tooltip}
+      aria-label={`${label} ${enabled ? 'on' : 'off'}`}
+      aria-pressed={enabled}
+      class={`font-mono transition-colors ${
+        enabled ? 'text-teal-bright' : 'text-fg-muted hover:text-fg'
+      }`}
+    >
+      {label} {enabled ? '●' : '◯'}
+    </button>
+  )
 }
 
 function HeroClip({ clip, keyId }: { clip: Clip; keyId: number }) {
