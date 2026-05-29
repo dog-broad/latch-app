@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'preact/hooks'
 import { subscribeToRoomClips, base64ToBytes } from '@/firebase/clips'
 import { decryptForRoom } from '@/crypto/client'
+import { detectClipKind, type ClipKind } from '@/clip/detect'
 
 /**
  * a clip after the worker has decrypted it. `text` is the utf-8
- * plaintext; binary payloads (files) get their own shape in a
- * later commit.
+ * plaintext; `kind` is the auto-detected shape (url, json, code,
+ * text) the renderer uses to pick the right layout. binary
+ * payloads (files) get their own shape in a later commit.
  */
 export type Clip = {
   readonly id: string
   readonly ts: number
   readonly text: string
+  readonly kind: ClipKind
 }
 
 /**
@@ -39,7 +42,8 @@ export function useRoomClips(keyId: number, roomPath: string): readonly Clip[] {
             try {
               const bytes = base64ToBytes(c.payload)
               const plaintext = await decryptForRoom(keyId, bytes)
-              decrypted.push({ id, ts: c.ts, text: decoder.decode(plaintext) })
+              const text = decoder.decode(plaintext)
+              decrypted.push({ id, ts: c.ts, text, kind: detectClipKind(text) })
             } catch {
               // wrong key, tampered payload, or unknown handle — drop silently.
             }

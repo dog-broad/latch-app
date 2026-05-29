@@ -141,12 +141,41 @@ function EmptyState() {
 function HeroClip({ clip }: { clip: Clip }) {
   return (
     <>
-      <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono">{clip.text}</pre>
+      <ClipBody clip={clip} />
       <div class="mt-6 flex items-center gap-3 text-fg-muted text-12">
         <span aria-hidden="true">────</span>
+        <span>{clip.kind.type}</span>
+        <span aria-hidden="true">·</span>
         <span>{formatTime(clip.ts)}</span>
       </div>
     </>
+  )
+}
+
+function ClipBody({ clip }: { clip: Clip }) {
+  if (clip.kind.type === 'url') {
+    return (
+      <a
+        href={clip.kind.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="text-teal-bright text-14 font-mono break-all hover:text-teal-mid transition-colors"
+      >
+        {clip.text}
+      </a>
+    )
+  }
+  if (clip.kind.type === 'json') {
+    return (
+      <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono">
+        {clip.kind.pretty}
+      </pre>
+    )
+  }
+  // text and code render the raw text; syntax highlighting on code
+  // lands in a subsequent commit.
+  return (
+    <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono">{clip.text}</pre>
   )
 }
 
@@ -154,6 +183,7 @@ function EarlierClip({ clip }: { clip: Clip }) {
   return (
     <li class="flex items-baseline gap-3 text-14">
       <span class="text-fg-muted text-12 shrink-0">{formatTime(clip.ts)}</span>
+      <span class="text-fg-faint text-12 shrink-0 w-12 truncate">{clip.kind.type}</span>
       <span class="text-fg truncate font-mono">{clip.text}</span>
     </li>
   )
