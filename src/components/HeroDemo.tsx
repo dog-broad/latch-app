@@ -31,7 +31,7 @@ export function HeroDemo() {
 
   return (
     <div
-      class="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-4 md:gap-0 items-stretch"
+      class="grid grid-cols-1 md:grid-cols-[1fr_16rem_1fr] gap-4 md:gap-0 items-stretch"
       aria-label="live encryption demo"
     >
       <DemoBox label="you type">
