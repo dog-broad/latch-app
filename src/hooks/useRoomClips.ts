@@ -1,28 +1,36 @@
 import { useEffect, useState } from 'preact/hooks'
-import { subscribeToRoomClips, base64ToBytes } from '@/firebase/clips'
+import { subscribeToRoomClips, base64ToBytes, type FirebaseFileRef } from '@/firebase/clips'
 import { decryptForRoom } from '@/crypto/client'
+import { detectClipKind, type ClipKind } from '@/clip/detect'
+import { decryptFileMetadata, type FileMetadata } from '@/clip/file-pipeline'
 
 /**
- * a clip after the worker has decrypted it. `text` is the utf-8
- * plaintext; binary payloads (files) get their own shape in a
- * later commit.
+ * a clip after the worker has decrypted the small metadata. text clips
+ * carry the plaintext + the auto-detected kind. file clips carry the
+ * decrypted filename and mime plus the metadata needed to fetch and
+ * verify the firestore chunks on demand. silently dropped if decrypt
+ * fails — trust contract says we don't surface which clip failed.
  */
-export type Clip = {
+export type TextClip = {
+  readonly type: 'text'
   readonly id: string
   readonly ts: number
   readonly text: string
+  readonly kind: ClipKind
 }
 
-/**
- * subscribe to the room's clips, decrypt each via the worker, and
- * surface the sorted list (newest first) to the caller. cleanup
- * detaches the listener and prevents late-arriving decrypts from
- * touching state after unmount.
- *
- * clips that fail to decrypt (wrong key in a colliding room, tamper,
- * malformed envelope) are silently dropped — the trust contract says
- * we don't surface which clip failed or why.
- */
+export type FileClip = {
+  readonly type: 'file'
+  readonly id: string
+  readonly ts: number
+  readonly name: string
+  readonly mime: string
+  readonly size: number
+  readonly meta: FileMetadata
+}
+
+export type Clip = TextClip | FileClip
+
 export function useRoomClips(keyId: number, roomPath: string): readonly Clip[] {
   const [clips, setClips] = useState<readonly Clip[]>([])
 
@@ -37,11 +45,31 @@ export function useRoomClips(keyId: number, roomPath: string): readonly Clip[] {
           const decrypted: Clip[] = []
           for (const [id, c] of raw) {
             try {
-              const bytes = base64ToBytes(c.payload)
-              const plaintext = await decryptForRoom(keyId, bytes)
-              decrypted.push({ id, ts: c.ts, text: decoder.decode(plaintext) })
+              if ('payload' in c) {
+                const plaintext = await decryptForRoom(keyId, base64ToBytes(c.payload))
+                const text = decoder.decode(plaintext)
+                decrypted.push({
+                  type: 'text',
+                  id,
+                  ts: c.ts,
+                  text,
+                  kind: detectClipKind(text),
+                })
+              } else {
+                const meta = firebaseRefToMeta(c.file)
+                const { name, mime } = await decryptFileMetadata(meta, keyId)
+                decrypted.push({
+                  type: 'file',
+                  id,
+                  ts: c.ts,
+                  name,
+                  mime,
+                  size: meta.size,
+                  meta,
+                })
+              }
             } catch {
-              // wrong key, tampered payload, or unknown handle — drop silently.
+              // wrong key, tampered metadata, or malformed envelope — drop silently
             }
           }
           if (cancelled) return
@@ -50,8 +78,6 @@ export function useRoomClips(keyId: number, roomPath: string): readonly Clip[] {
         })
         if (cancelled) unsubscribe?.()
       } catch (err) {
-        // surfacing subscribe failures (auth, network) on the console is
-        // enough for now; a proper toast lives with the polish-phase rules.
         console.error('failed to subscribe to room clips:', err)
       }
     })()
@@ -63,4 +89,16 @@ export function useRoomClips(keyId: number, roomPath: string): readonly Clip[] {
   }, [keyId, roomPath])
 
   return clips
+}
+
+function firebaseRefToMeta(file: FirebaseFileRef): FileMetadata {
+  return {
+    fileId: file.id,
+    encryptedName: file.encryptedName,
+    encryptedMime: file.encryptedMime,
+    size: file.size,
+    chunkCount: file.chunkCount,
+    chunkPathPrefix: file.chunkPathPrefix,
+    manifest: file.manifest,
+  }
 }
