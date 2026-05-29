@@ -30,10 +30,10 @@ export function Privacy() {
             the trade for not retyping.
           </li>
           <li>
-            the page touches exactly two outbound connection categories:
-            firebase (<span class="font-mono text-fg-muted text-14">*.firebaseio.com</span>,{' '}
-            <span class="font-mono text-fg-muted text-14">firestore.googleapis.com</span>) and the cdn
-            serving this page. nothing else.
+            the page touches exactly two outbound connection categories: firebase
+            (the five hosts enumerated on{' '}
+            <a href="/trust" class="text-teal-bright hover:text-teal-mid underline underline-offset-4 transition-colors">trust</a>
+            ) and the cdn serving this page. nothing else.
           </li>
         </ul>
 
@@ -43,7 +43,7 @@ export function Privacy() {
         </p>
 
         <p class="mt-12 text-fg-muted text-14">
-          <a href="/trust" class="text-teal-bright hover:text-teal-mid transition-colors">
+          <a href="/trust" class="text-teal-bright hover:text-teal-mid underline underline-offset-4 transition-colors">
             trust →
           </a>{' '}
           covers the threat model in full.

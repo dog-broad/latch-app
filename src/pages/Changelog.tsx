@@ -22,7 +22,7 @@ export function Changelog() {
             href="https://github.com/dog-broad/latch-app/releases"
             target="_blank"
             rel="noopener noreferrer"
-            class="text-teal-bright hover:text-teal-mid transition-colors"
+            class="text-teal-bright hover:text-teal-mid underline underline-offset-4 transition-colors"
           >
             github release notes ↗
           </a>{' '}

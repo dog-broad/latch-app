@@ -65,11 +65,15 @@ export function Trust() {
         <h2 class="mt-12 text-24 font-bold leading-tight">the trust contract</h2>
         <ul class="mt-4 space-y-2 text-fg text-16 leading-normal list-disc list-outside pl-6">
           <li>
-            exactly two outbound connection categories: firebase (
+            exactly two outbound connection categories. firebase, enumerated
+            in csp <span class="font-mono text-fg-muted text-14">connect-src</span> as{' '}
             <span class="font-mono text-fg-muted text-14">*.firebaseio.com</span>,{' '}
-            <span class="font-mono text-fg-muted text-14">firestore.googleapis.com</span>) and the cdn serving this page.
-            no analytics. no telemetry. no error reporting service. no
-            preview-link unfurling. no favicon fetches.
+            <span class="font-mono text-fg-muted text-14">firestore.googleapis.com</span>,{' '}
+            <span class="font-mono text-fg-muted text-14">identitytoolkit.googleapis.com</span>,{' '}
+            <span class="font-mono text-fg-muted text-14">securetoken.googleapis.com</span>,{' '}
+            <span class="font-mono text-fg-muted text-14">firebaseinstallations.googleapis.com</span>.
+            and the cdn serving this page. no analytics. no telemetry. no error
+            reporting service. no preview-link unfurling. no favicon fetches.
           </li>
           <li>
             non-extractable keys. the per-room aes-gcm key lives inside the web
@@ -89,7 +93,7 @@ export function Trust() {
         </ul>
 
         <p class="mt-12 text-fg-muted text-14">
-          <a href="https://github.com/dog-broad/latch-app" target="_blank" rel="noopener noreferrer" class="text-teal-bright hover:text-teal-mid transition-colors">
+          <a href="https://github.com/dog-broad/latch-app" target="_blank" rel="noopener noreferrer" class="text-teal-bright hover:text-teal-mid underline underline-offset-4 transition-colors">
             source ↗
           </a>{' '}
           takes you to the github repo.

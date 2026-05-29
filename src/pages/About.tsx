@@ -55,7 +55,7 @@ export function About() {
         </p>
 
         <p class="mt-12 text-fg-muted text-14">
-          <a href="/trust" class="text-teal-bright hover:text-teal-mid transition-colors">
+          <a href="/trust" class="text-teal-bright hover:text-teal-mid underline underline-offset-4 transition-colors">
             trust →
           </a>{' '}
           goes into what firebase sees vs. doesn't, the threat model in detail.
