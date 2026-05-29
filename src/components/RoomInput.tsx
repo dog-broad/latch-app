@@ -109,6 +109,18 @@ export function RoomInput() {
           class={inputClass}
         />
       )}
+      {/* invisible default submit button — html only implicitly submits
+          on Enter when a form has exactly one text input OR a default
+          button. once the passphrase field expands we have two inputs,
+          so this restores Enter-to-submit without changing the visual. */}
+      <button
+        type="submit"
+        tabIndex={-1}
+        aria-hidden="true"
+        class="sr-only"
+      >
+        join
+      </button>
       {error !== null && (
         <p class="text-error text-12 mt-1" role="alert">
           {error}
