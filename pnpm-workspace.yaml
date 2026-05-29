@@ -1,0 +1,5 @@
+# pnpm 11+ moved package-level settings here. Not a workspace — single-package
+# repo. Postinstall scripts run only for explicitly-allowed packages; anything
+# new added to the dep tree gets blocked until reviewed.
+allowBuilds:
+  esbuild: true
