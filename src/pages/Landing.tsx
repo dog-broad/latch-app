@@ -1,6 +1,6 @@
 import { Header } from '@/components/Header'
 import { RoomInput } from '@/components/RoomInput'
-import { DemoSlot } from '@/components/DemoSlot'
+import { HeroDemo } from '@/components/HeroDemo'
 
 /**
  * the entry route. headline, room input, manifesto, the encryption
@@ -30,7 +30,7 @@ export function Landing() {
         <hr class="border-0 border-t border-border my-16" />
 
         <p class="text-fg-muted text-14 mb-6">see for yourself</p>
-        <DemoSlot />
+        <HeroDemo />
 
         <hr class="border-0 border-t border-border my-16" />
 
