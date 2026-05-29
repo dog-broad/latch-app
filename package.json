@@ -12,7 +12,8 @@
     "test:run": "vitest run",
     "test:rules": "firebase emulators:exec --project demo-latch-rules --only database,firestore \"vitest run --config vitest.rules.config.ts\"",
     "emulators": "firebase emulators:start --project demo-latch-rules --only auth,database,firestore",
-    "hash": "node scripts/hash-dist.mjs"
+    "hash": "node scripts/hash-dist.mjs",
+    "preview:csp": "node scripts/serve-with-headers.mjs"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.2.8",
