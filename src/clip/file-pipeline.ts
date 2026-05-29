@@ -1,6 +1,5 @@
 import { encryptForRoom, decryptForRoom } from '@/crypto/client'
 import { getFirestoreDb } from '@/firebase/firestore'
-import { bytesToBase64, base64ToBytes } from '@/firebase/clips'
 
 /**
  * file-clip pipeline. main-thread orchestration on top of the worker's
@@ -18,7 +17,11 @@ import { bytesToBase64, base64ToBytes } from '@/firebase/clips'
  * binary chunks live in firestore. neither side sees plaintext.
  */
 
-export const FILE_CHUNK_SIZE = 1024 * 1024 // 1 MiB
+// firestore's per-field byte cap is 1,048,487. with the 12-byte iv +
+// 16-byte gcm tag taking 28 bytes of envelope overhead, a chunk of
+// 1,048,400 plaintext bytes encrypts to 1,048,428 bytes — comfortably
+// under the limit, and we sweep almost the full document budget.
+export const FILE_CHUNK_SIZE = 1_048_400
 export const MAX_FILE_BYTES = 10 * 1024 * 1024 // 10 MB cap per PROJECT spec
 
 export type FileMetadata = {
@@ -73,7 +76,7 @@ export async function uploadFileClip(
   ])
 
   const manifest: string[] = []
-  const { doc, setDoc } = await import('firebase/firestore')
+  const { doc, setDoc, Bytes } = await import('firebase/firestore')
   const db = await getFirestoreDb()
 
   let bytesUploaded = 0
@@ -85,7 +88,7 @@ export async function uploadFileClip(
 
     const payload = await encryptForRoom(keyId, plaintext, chunkIndexAad(i))
     await setDoc(doc(db, `${chunkPathPrefix}/${i}`), {
-      payload: bytesToBase64(payload),
+      payload: Bytes.fromUint8Array(payload),
     })
 
     bytesUploaded += end - start
@@ -99,13 +102,26 @@ export async function uploadFileClip(
 
   return {
     fileId,
-    encryptedName: bytesToBase64(encryptedName),
-    encryptedMime: bytesToBase64(encryptedMime),
+    encryptedName: u8ToB64(encryptedName),
+    encryptedMime: u8ToB64(encryptedMime),
     size: buffer.length,
     chunkCount,
     chunkPathPrefix,
     manifest,
   }
+}
+
+function u8ToB64(bytes: Uint8Array): string {
+  let binary = ''
+  for (const b of bytes) binary += String.fromCharCode(b)
+  return btoa(binary)
+}
+
+function b64ToU8(b64: string): Uint8Array {
+  const binary = atob(b64)
+  const out = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)
+  return out
 }
 
 export async function decryptFileMetadata(
@@ -114,8 +130,8 @@ export async function decryptFileMetadata(
 ): Promise<{ name: string; mime: string }> {
   const dec = new TextDecoder()
   const [nameBytes, mimeBytes] = await Promise.all([
-    decryptForRoom(keyId, base64ToBytes(meta.encryptedName)),
-    decryptForRoom(keyId, base64ToBytes(meta.encryptedMime)),
+    decryptForRoom(keyId, b64ToU8(meta.encryptedName)),
+    decryptForRoom(keyId, b64ToU8(meta.encryptedMime)),
   ])
   return { name: dec.decode(nameBytes), mime: dec.decode(mimeBytes) }
 }
@@ -137,11 +153,12 @@ export async function downloadFileChunks(
   let offset = 0
   for (let i = 0; i < meta.chunkCount; i++) {
     const snap = await getDoc(doc(db, `${meta.chunkPathPrefix}/${i}`))
-    const data = snap.data() as { payload?: string } | undefined
+    const data = snap.data() as { payload?: { toUint8Array(): Uint8Array } } | undefined
     if (!data?.payload) {
       throw new Error(`missing chunk ${i}`)
     }
-    const plaintext = await decryptForRoom(keyId, base64ToBytes(data.payload), chunkIndexAad(i))
+    const payload = data.payload.toUint8Array()
+    const plaintext = await decryptForRoom(keyId, payload, chunkIndexAad(i))
     const expectedHash = meta.manifest[i]
     const actualHash = await sha256Hex(plaintext)
     if (expectedHash !== actualHash) {

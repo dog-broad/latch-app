@@ -208,7 +208,7 @@ export function Latched() {
         <article class="border border-border bg-bg-lifted rounded p-6 md:p-8">
           <header class="flex flex-wrap items-center justify-between text-fg-muted text-12 gap-3">
             <span class="truncate">latched · {name}</span>
-            <div class="flex flex-wrap items-center gap-3 shrink-0">
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
               <AutoToggle
                 enabled={toggles.autoWatch}
                 onClick={() => flipToggle('autoWatch')}
