@@ -1,16 +1,27 @@
 import type { Unsubscribe } from 'firebase/database'
 
 /**
- * shape of a clip as it lives in realtime database. `payload` is
- * base64 of `(12-byte iv || aes-gcm ciphertext+tag)` — what
- * `encryptForRoom` returns, packaged for json transport. `ts` is the
- * firebase server timestamp at write time, so clients sort the same
- * way regardless of their own clock skew.
+ * shape of a clip as it lives in realtime database. text clips carry
+ * `payload` (base64 of `iv || aes-gcm ciphertext+tag` from
+ * encryptForRoom). file clips replace `payload` with a `file` record
+ * pointing at the firestore chunk path and carrying the (encrypted)
+ * filename / mime, plain size + chunk count, and the manifest of
+ * sha-256 hashes for integrity verification. `ts` is the firebase
+ * server timestamp at write time.
  */
-export type FirebaseClip = {
-  readonly ts: number
-  readonly payload: string
+export type FirebaseFileRef = {
+  readonly id: string
+  readonly encryptedName: string
+  readonly encryptedMime: string
+  readonly size: number
+  readonly chunkCount: number
+  readonly chunkPathPrefix: string
+  readonly manifest: readonly string[]
 }
+
+export type FirebaseClip =
+  | { readonly ts: number; readonly payload: string }
+  | { readonly ts: number; readonly file: FirebaseFileRef }
 
 export function base64ToBytes(b64: string): Uint8Array {
   const binary = atob(b64)
@@ -54,6 +65,30 @@ export async function publishClipToRoom(
 }
 
 /**
+ * publish a file-clip metadata record. the binary chunks have already
+ * landed in firestore; this writes only the small rtdb record that
+ * tells receivers where to find them and how to verify them.
+ */
+export async function publishFileClipToRoom(
+  roomPath: string,
+  file: FirebaseFileRef,
+): Promise<void> {
+  const [{ getDatabase, ref, push, serverTimestamp }, { getFirebaseApp }, { getFirebaseAuth }] = await Promise.all([
+    import('firebase/database'),
+    import('./init'),
+    import('./auth'),
+  ])
+
+  await getFirebaseAuth()
+
+  const db = getDatabase(getFirebaseApp())
+  await push(ref(db, `rooms/${roomPath}/clips`), {
+    ts: serverTimestamp(),
+    file,
+  })
+}
+
+/**
  * subscribe to the last 10 clips for `roomPath`. the returned
  * unsubscribe handle detaches the listener; it doesn't sign out of
  * firebase or touch any other room. anonymous auth is awaited first
@@ -76,10 +111,13 @@ export async function subscribeToRoomClips(
   return onValue(clipsRef, (snap) => {
     const result = new Map<string, FirebaseClip>()
     snap.forEach((child) => {
-      const val = child.val() as Partial<FirebaseClip> | null
+      const val = child.val() as { ts?: number; payload?: string; file?: FirebaseFileRef } | null
       const key = child.key
-      if (key && val && typeof val.payload === 'string' && typeof val.ts === 'number') {
+      if (!key || !val || typeof val.ts !== 'number') return false
+      if (typeof val.payload === 'string') {
         result.set(key, { ts: val.ts, payload: val.payload })
+      } else if (val.file && typeof val.file.id === 'string' && typeof val.file.chunkCount === 'number') {
+        result.set(key, { ts: val.ts, file: val.file })
       }
       return false
     })

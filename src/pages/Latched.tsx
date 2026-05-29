@@ -1,12 +1,18 @@
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { useLocation } from 'preact-iso'
 import { Header } from '@/components/Header'
 import { getCurrentRoom } from '@/state/room'
-import { useRoomClips, type Clip } from '@/hooks/useRoomClips'
+import { useRoomClips, type Clip, type FileClip as FileClipType, type TextClip } from '@/hooks/useRoomClips'
 import { encryptForRoom } from '@/crypto/client'
-import { publishClipToRoom } from '@/firebase/clips'
+import { publishClipToRoom, publishFileClipToRoom } from '@/firebase/clips'
 import { highlightCode } from '@/clip/highlight'
 import { canFormat, formatCode } from '@/clip/format'
+import {
+  uploadFileClip,
+  downloadFileChunks,
+  MAX_FILE_BYTES,
+  type UploadProgress,
+} from '@/clip/file-pipeline'
 
 function formatTime(ts: number): string {
   const ageMs = Date.now() - ts
@@ -15,19 +21,12 @@ function formatTime(ts: number): string {
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
 }
 
-/**
- * the app shell once a room is joined. structure follows the §6.2
- * mock: header with the room name, a hero card for the newest clip,
- * an "earlier" list of one-liners below, and a composer at the foot.
- *
- * clips arrive via useRoomClips, which lazy-loads firebase auth +
- * database the first time this view mounts. the composer is still
- * non-functional in this commit — the encrypt-then-publish pipeline
- * lands separately.
- *
- * unauthenticated landing: visiting /latched without a current room
- * routes back to / on mount.
- */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
 export function Latched() {
   const { route } = useLocation()
   const room = getCurrentRoom()
@@ -46,8 +45,11 @@ export function Latched() {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const [upload, setUpload] = useState<UploadProgress | null>(null)
+  const [dragOver, setDragOver] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  async function send() {
+  async function sendText() {
     const text = draft.trim()
     if (!text || sending) return
     setSending(true)
@@ -64,16 +66,62 @@ export function Latched() {
     }
   }
 
+  async function sendFile(file: File) {
+    if (sending) return
+    if (file.size > MAX_FILE_BYTES) {
+      setSendError(`file too large — ${formatSize(file.size)} exceeds the ${formatSize(MAX_FILE_BYTES)} cap`)
+      return
+    }
+    setSending(true)
+    setSendError(null)
+    setUpload({
+      chunksUploaded: 0,
+      chunkCount: Math.max(1, Math.ceil(file.size / (1024 * 1024))),
+      bytesUploaded: 0,
+      bytesTotal: file.size,
+    })
+    try {
+      const meta = await uploadFileClip(roomPath, keyId, file, (p) => setUpload(p))
+      await publishFileClipToRoom(roomPath, {
+        id: meta.fileId,
+        encryptedName: meta.encryptedName,
+        encryptedMime: meta.encryptedMime,
+        size: meta.size,
+        chunkCount: meta.chunkCount,
+        chunkPathPrefix: meta.chunkPathPrefix,
+        manifest: meta.manifest,
+      })
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'failed to send file')
+    } finally {
+      setSending(false)
+      setUpload(null)
+    }
+  }
+
   function handleSubmit(e: Event) {
     e.preventDefault()
-    void send()
+    void sendText()
   }
 
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
-      void send()
+      void sendText()
     }
+  }
+
+  function handleFilePick(e: Event) {
+    const f = (e.currentTarget as HTMLInputElement).files?.[0]
+    if (f) void sendFile(f)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  function handleDrop(e: DragEvent) {
+    e.preventDefault()
+    setDragOver(false)
+    const f = e.dataTransfer?.files?.[0]
+    if (f) void sendFile(f)
   }
 
   const canSend = draft.trim().length > 0 && !sending
@@ -88,7 +136,7 @@ export function Latched() {
             <span aria-label="auto-copy off">auto-copy ◯</span>
           </header>
           <div class="mt-8 md:mt-12 min-h-[6rem]">
-            {newest ? <HeroClip clip={newest} /> : <EmptyState />}
+            {newest ? <HeroClip clip={newest} keyId={keyId} /> : <EmptyState />}
           </div>
         </article>
 
@@ -103,8 +151,21 @@ export function Latched() {
           </section>
         )}
 
-        <form class="mt-12" onSubmit={handleSubmit}>
-          <div class="border border-border rounded bg-bg-sunk">
+        <form
+          class="mt-12"
+          onSubmit={handleSubmit}
+          onDragOver={(e) => {
+            e.preventDefault()
+            setDragOver(true)
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+        >
+          <div
+            class={`border rounded bg-bg-sunk transition-colors ${
+              dragOver ? 'border-teal-mid' : 'border-border'
+            }`}
+          >
             <textarea
               placeholder="paste · drop · type · ⌘↵ to send"
               aria-label="new clip"
@@ -116,10 +177,42 @@ export function Latched() {
               disabled={sending}
               class="w-full bg-transparent text-fg text-14 placeholder:text-fg-faint p-4 outline-none focus:ring-2 focus:ring-teal-mid focus:ring-inset resize-none disabled:opacity-50"
             />
-            <div class="flex items-center justify-between border-t border-border px-4 py-2">
-              <span class="text-fg-muted text-12" role={sendError ? 'alert' : undefined}>
+            {upload && (
+              <div class="px-4 pb-3" aria-live="polite">
+                <div class="text-fg-muted text-12 mb-1">
+                  uploading · {upload.chunksUploaded} / {upload.chunkCount} chunks ·{' '}
+                  {formatSize(upload.bytesUploaded)} / {formatSize(upload.bytesTotal)}
+                </div>
+                <div class="h-1 bg-bg-lifted rounded overflow-hidden">
+                  <div
+                    class="h-full bg-teal-mid transition-all"
+                    style={{
+                      width: `${upload.bytesTotal > 0 ? (upload.bytesUploaded / upload.bytesTotal) * 100 : 0}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+            <div class="flex items-center justify-between border-t border-border px-4 py-2 gap-3">
+              <span class="text-fg-muted text-12 flex-1 truncate" role={sendError ? 'alert' : undefined}>
                 {sendError ?? ''}
               </span>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={sending}
+                aria-label="attach file"
+                class="text-fg-muted text-14 font-mono hover:text-teal-bright transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                [ attach ]
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={handleFilePick}
+                class="hidden"
+                aria-hidden="true"
+              />
               <button
                 type="submit"
                 disabled={!canSend}
@@ -140,10 +233,17 @@ function EmptyState() {
   return <p class="text-fg-faint text-14">no clips yet. paste anything.</p>
 }
 
-function HeroClip({ clip }: { clip: Clip }) {
+function HeroClip({ clip, keyId }: { clip: Clip; keyId: number }) {
+  if (clip.type === 'file') {
+    return <HeroFileClip clip={clip} keyId={keyId} />
+  }
+  return <HeroTextClip clip={clip} />
+}
+
+function HeroTextClip({ clip }: { clip: TextClip }) {
   return (
     <>
-      <ClipBody clip={clip} />
+      <TextClipBody clip={clip} />
       <div class="mt-6 flex items-center gap-3 text-fg-muted text-12">
         <span aria-hidden="true">────</span>
         <span>{clip.kind.type}</span>
@@ -154,7 +254,115 @@ function HeroClip({ clip }: { clip: Clip }) {
   )
 }
 
-function ClipBody({ clip }: { clip: Clip }) {
+function HeroFileClip({ clip, keyId }: { clip: FileClipType; keyId: number }) {
+  const isImage = clip.mime.startsWith('image/')
+  return (
+    <>
+      {isImage ? (
+        <ImagePreview clip={clip} keyId={keyId} />
+      ) : (
+        <DownloadButton clip={clip} keyId={keyId} />
+      )}
+      <div class="mt-6 flex items-center gap-3 text-fg-muted text-12">
+        <span aria-hidden="true">────</span>
+        <span>file · {clip.name}</span>
+        <span aria-hidden="true">·</span>
+        <span>{formatSize(clip.size)}</span>
+        <span aria-hidden="true">·</span>
+        <span>{formatTime(clip.ts)}</span>
+      </div>
+    </>
+  )
+}
+
+function ImagePreview({ clip, keyId }: { clip: FileClipType; keyId: number }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let revokeUrl: string | null = null
+    void (async () => {
+      try {
+        const bytes = await downloadFileChunks(clip.meta, keyId)
+        if (cancelled) return
+        const blob = new Blob([new Uint8Array(bytes)], { type: clip.mime })
+        const objectUrl = URL.createObjectURL(blob)
+        revokeUrl = objectUrl
+        setUrl(objectUrl)
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'image fetch failed')
+      }
+    })()
+    return () => {
+      cancelled = true
+      if (revokeUrl) URL.revokeObjectURL(revokeUrl)
+    }
+  }, [clip.meta, keyId, clip.mime])
+
+  if (error) {
+    return <p class="text-error text-14">image: {error}</p>
+  }
+  if (!url) {
+    return <p class="text-fg-faint text-14">decrypting image…</p>
+  }
+  return (
+    <img
+      src={url}
+      alt={clip.name}
+      class="max-w-full max-h-96 rounded border border-border"
+    />
+  )
+}
+
+function DownloadButton({ clip, keyId }: { clip: FileClipType; keyId: number }) {
+  const [downloading, setDownloading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function onDownload() {
+    if (downloading) return
+    setDownloading(true)
+    setError(null)
+    try {
+      const bytes = await downloadFileChunks(clip.meta, keyId)
+      const blob = new Blob([new Uint8Array(bytes)], { type: clip.mime })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = clip.name
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'download failed')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  return (
+    <div>
+      <div class="text-fg text-14 font-mono break-all">{clip.name}</div>
+      <div class="mt-2 text-fg-muted text-12">{clip.mime || 'unknown type'}</div>
+      <button
+        type="button"
+        onClick={onDownload}
+        disabled={downloading}
+        class="mt-4 bg-teal-mid text-bg text-14 font-medium px-4 py-2 rounded hover:bg-teal-bright transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-teal-mid"
+      >
+        {downloading ? 'downloading…' : 'download'}
+      </button>
+      {error !== null && (
+        <p class="mt-2 text-error text-12" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function TextClipBody({ clip }: { clip: TextClip }) {
   if (clip.kind.type === 'url') {
     return <UrlBody href={clip.kind.href} text={clip.text} />
   }
@@ -174,9 +382,6 @@ function ClipBody({ clip }: { clip: Clip }) {
 }
 
 function UrlBody({ href, text }: { href: string; text: string }) {
-  // hostname extracted client-side — no outbound fetch for favicon
-  // or title, since that'd contradict the trust contract's
-  // exactly-two-outbound-categories rule.
   let hostname: string
   try {
     hostname = new URL(href).hostname
@@ -251,10 +456,6 @@ function CodeBlock({ code, language }: { code: string; language: string | null }
       {html ? (
         <div
           class="shiki-host text-14 font-mono"
-          // shiki's html is a sanitized <pre><code>...</code></pre> tree —
-          // it does not include any user-controlled attributes that could
-          // execute scripts, and the input it formats is already trusted
-          // plaintext from the decrypt path.
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
@@ -277,11 +478,13 @@ function CodeBlock({ code, language }: { code: string; language: string | null }
 }
 
 function EarlierClip({ clip }: { clip: Clip }) {
+  const summary = clip.type === 'file' ? `${clip.name} · ${formatSize(clip.size)}` : clip.text
+  const badge = clip.type === 'file' ? 'file' : clip.kind.type
   return (
     <li class="flex items-baseline gap-3 text-14">
       <span class="text-fg-muted text-12 shrink-0">{formatTime(clip.ts)}</span>
-      <span class="text-fg-faint text-12 shrink-0 w-12 truncate">{clip.kind.type}</span>
-      <span class="text-fg truncate font-mono">{clip.text}</span>
+      <span class="text-fg-faint text-12 shrink-0 w-12 truncate">{badge}</span>
+      <span class="text-fg truncate font-mono">{summary}</span>
     </li>
   )
 }
