@@ -10,6 +10,13 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  worker: {
+    // the crypto worker does `await import('hash-wasm')` for the argon2id
+    // wasm chunk; that's code-splitting inside the worker, which only
+    // works with the esm output format. vite's default `iife` rejects
+    // multi-chunk worker builds, so opt the worker pipeline into esm.
+    format: 'es',
+  },
   test: {
     environment: 'node',
     globals: false,
