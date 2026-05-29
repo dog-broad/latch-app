@@ -99,3 +99,32 @@ body {
   margin: 0;
   min-height: 100vh;
 }
+
+/* hero-demo cipher strip. a 2.4 s linear sweep moves a teal-bright
+   highlight across a teal-deep base — the visible "encryption
+   happening here" cue between the plaintext and ciphertext boxes.
+   keep it linear, not eased: the steady-state should feel mechanical,
+   not whimsical. */
+@keyframes glow-sweep {
+  0% {
+    background-position: -150% 0;
+  }
+  100% {
+    background-position: 250% 0;
+  }
+}
+
+.cipher-strip {
+  background-color: var(--color-teal-deep);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 40%,
+    var(--color-teal-bright) 50%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: glow-sweep 2.4s linear infinite;
+}

@@ -1,13 +1,20 @@
+import { useEffect, useState } from 'preact/hooks'
+
+const STRIP_BLOCK_CHARS = '░▒▓ ░ ▒'
+const STRIP_CELLS = 14
+const STRIP_TICK_MS = 140
+
 /**
  * the landing-page centerpiece: a live encryption demo. left box
  * holds the plaintext, right box holds the ciphertext, transformation
  * strip in the middle visually carries the bytes across.
  *
- * this commit lays the layout shell — three sharp-edged boxes side by
- * side on desktop, stacked on mobile. boxes hold placeholder content
- * for now; subsequent commits add the glow animation on the strip,
- * the reactive plaintext input, and the real aes-gcm encryption that
- * drives the ciphertext side.
+ * the strip has a 2.4 s teal-glow sweep (driven from app.css) and a
+ * raf-paced character morph: every ~140 ms the cells re-roll to a
+ * new mix of block glyphs, so the strip looks "alive" even when the
+ * user isn't typing. the box contents themselves are still
+ * placeholders here — the reactive plaintext + real aes-gcm output
+ * land in subsequent commits.
  */
 export function HeroDemo() {
   return (
@@ -38,14 +45,38 @@ function DemoBox({ label, body }: { label: string; body: preact.ComponentChildre
 }
 
 function CipherStrip() {
+  const [blocks, setBlocks] = useState(() => randomBlocks(STRIP_CELLS))
+
+  useEffect(() => {
+    let raf = 0
+    let last = 0
+    function tick(now: number) {
+      if (now - last >= STRIP_TICK_MS) {
+        setBlocks(randomBlocks(STRIP_CELLS))
+        last = now
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
   return (
     <div
-      class="border-y md:border-y md:border-x-0 border-x md:border-l md:border-r border-border-hot bg-teal-deep flex items-center justify-center px-6 md:px-8 py-4 md:py-0 min-h-16"
+      class="cipher-strip border-y md:border-y md:border-x-0 border-x md:border-l md:border-r border-border-hot flex flex-col items-center justify-center gap-1 px-6 md:px-8 py-4 md:py-3 min-h-16"
       aria-hidden="true"
     >
-      <span class="text-teal-bright text-14 font-mono whitespace-nowrap">
-        encrypting
-      </span>
+      <span class="text-bg-sunk text-12 font-mono tracking-widest">{blocks}</span>
+      <span class="text-bg text-14 font-mono">encrypting</span>
     </div>
   )
+}
+
+function randomBlocks(n: number): string {
+  let s = ''
+  for (let i = 0; i < n; i++) {
+    const ch = STRIP_BLOCK_CHARS.charAt(Math.floor(Math.random() * STRIP_BLOCK_CHARS.length))
+    s += ch
+  }
+  return s
 }
