@@ -6,6 +6,7 @@ import { useRoomClips, type Clip } from '@/hooks/useRoomClips'
 import { encryptForRoom } from '@/crypto/client'
 import { publishClipToRoom } from '@/firebase/clips'
 import { highlightCode } from '@/clip/highlight'
+import { canFormat, formatCode } from '@/clip/format'
 
 function formatTime(ts: number): string {
   const ageMs = Date.now() - ts
@@ -202,13 +203,20 @@ function UrlBody({ href, text }: { href: string; text: string }) {
 }
 
 function CodeBlock({ code, language }: { code: string; language: string | null }) {
+  const [displayed, setDisplayed] = useState(code)
   const [html, setHtml] = useState<string | null>(null)
+  const [formatting, setFormatting] = useState(false)
+  const formattable = canFormat(language)
+
+  useEffect(() => {
+    setDisplayed(code)
+  }, [code])
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
-        const result = await highlightCode(code, language)
+        const result = await highlightCode(displayed, language)
         if (!cancelled) setHtml(result)
       } catch {
         // shiki failed or chunk fetch died; raw <pre> fallback keeps rendering
@@ -217,22 +225,54 @@ function CodeBlock({ code, language }: { code: string; language: string | null }
     return () => {
       cancelled = true
     }
-  }, [code, language])
+  }, [displayed, language])
 
-  if (!html) {
-    return (
-      <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono">{code}</pre>
-    )
+  async function onFormat() {
+    if (!formattable || language === null || formatting) return
+    setFormatting(true)
+    try {
+      const next = await formatCode(displayed, language)
+      setDisplayed(next.replace(/\n+$/, ''))
+    } catch (err) {
+      console.error('format failed:', err)
+    } finally {
+      setFormatting(false)
+    }
   }
+
+  const tooltip = formattable
+    ? formatting
+      ? 'formatting…'
+      : 'format with prettier'
+    : `no formatter for ${language ?? 'unknown'}`
+
   return (
-    <div
-      class="shiki-host text-14 font-mono"
-      // shiki's html is a sanitized <pre><code>...</code></pre> tree —
-      // it does not include any user-controlled attributes that could
-      // execute scripts, and the input it formats is already trusted
-      // plaintext from the decrypt path.
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <div>
+      {html ? (
+        <div
+          class="shiki-host text-14 font-mono"
+          // shiki's html is a sanitized <pre><code>...</code></pre> tree —
+          // it does not include any user-controlled attributes that could
+          // execute scripts, and the input it formats is already trusted
+          // plaintext from the decrypt path.
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      ) : (
+        <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono">
+          {displayed}
+        </pre>
+      )}
+      <button
+        type="button"
+        onClick={onFormat}
+        disabled={!formattable || formatting}
+        title={tooltip}
+        aria-label={tooltip}
+        class="mt-3 text-12 text-fg-muted font-mono hover:text-teal-bright transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-fg-muted"
+      >
+        [ {formatting ? 'formatting…' : 'format'} ]
+      </button>
+    </div>
   )
 }
 
