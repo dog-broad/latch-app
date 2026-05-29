@@ -42,6 +42,13 @@ export function bytesToBase64(bytes: Uint8Array): string {
  * this helper base64-wraps it and posts under a firebase auto-id with
  * a server-side timestamp so receivers sort consistently.
  *
+ * the write is a multi-path update that also stamps the writer's
+ * presence record — the security rule requires `now > lastWriteTs +
+ * 2000` so two clip writes from the same uid within 2 s fail
+ * atomically (the multi-path update is rejected as a whole, so the
+ * clip never lands either). that pattern gives a ~30/min ceiling
+ * without an out-of-band rate-limit table.
+ *
  * anonymous auth must already be settled; subscribe and publish both
  * await `getFirebaseAuth()` so concurrent calls share the sign-in.
  */
@@ -49,43 +56,78 @@ export async function publishClipToRoom(
   roomPath: string,
   payload: Uint8Array,
 ): Promise<void> {
-  const [{ getDatabase, ref, push, serverTimestamp }, { getFirebaseApp }, { getFirebaseAuth }] = await Promise.all([
+  const [{ getDatabase, ref, push, update, serverTimestamp }, { getFirebaseApp }, { getFirebaseAuth }] = await Promise.all([
     import('firebase/database'),
     import('./init'),
     import('./auth'),
   ])
 
-  await getFirebaseAuth()
+  const auth = await getFirebaseAuth()
+  const uid = auth.currentUser?.uid
+  if (!uid) throw new Error('no anonymous uid; auth not ready')
 
   const db = getDatabase(getFirebaseApp())
-  await push(ref(db, `rooms/${roomPath}/clips`), {
-    ts: serverTimestamp(),
-    payload: bytesToBase64(payload),
+  const clipKey = push(ref(db, `rooms/${roomPath}/clips`)).key
+  if (!clipKey) throw new Error('push failed to generate a key')
+
+  await update(ref(db), {
+    [`rooms/${roomPath}/clips/${clipKey}`]: {
+      ts: serverTimestamp(),
+      payload: bytesToBase64(payload),
+    },
+    [`rooms/${roomPath}/presence/${uid}/lastWriteTs`]: serverTimestamp(),
   })
+
+  schedulePrune(roomPath)
 }
 
 /**
  * publish a file-clip metadata record. the binary chunks have already
  * landed in firestore; this writes only the small rtdb record that
- * tells receivers where to find them and how to verify them.
+ * tells receivers where to find them and how to verify them. carries
+ * the same presence-timestamp update as `publishClipToRoom` so the
+ * rate-limit rule treats text and file writes uniformly.
  */
 export async function publishFileClipToRoom(
   roomPath: string,
   file: FirebaseFileRef,
 ): Promise<void> {
-  const [{ getDatabase, ref, push, serverTimestamp }, { getFirebaseApp }, { getFirebaseAuth }] = await Promise.all([
+  const [{ getDatabase, ref, push, update, serverTimestamp }, { getFirebaseApp }, { getFirebaseAuth }] = await Promise.all([
     import('firebase/database'),
     import('./init'),
     import('./auth'),
   ])
 
-  await getFirebaseAuth()
+  const auth = await getFirebaseAuth()
+  const uid = auth.currentUser?.uid
+  if (!uid) throw new Error('no anonymous uid; auth not ready')
 
   const db = getDatabase(getFirebaseApp())
-  await push(ref(db, `rooms/${roomPath}/clips`), {
-    ts: serverTimestamp(),
-    file,
+  const clipKey = push(ref(db, `rooms/${roomPath}/clips`)).key
+  if (!clipKey) throw new Error('push failed to generate a key')
+
+  await update(ref(db), {
+    [`rooms/${roomPath}/clips/${clipKey}`]: {
+      ts: serverTimestamp(),
+      file,
+    },
+    [`rooms/${roomPath}/presence/${uid}/lastWriteTs`]: serverTimestamp(),
   })
+
+  schedulePrune(roomPath)
+}
+
+/**
+ * fire prune asynchronously after a publish. errors are intentionally
+ * swallowed — a failing prune (e.g., a racing client got there first
+ * and the second prune sees fewer than 10) must not block the user's
+ * actual clip write from succeeding. lazy-import keeps the publish
+ * path off the prune chunk on first write.
+ */
+function schedulePrune(roomPath: string): void {
+  void import('./prune').then(({ pruneRoomToTenLatest }) =>
+    pruneRoomToTenLatest(roomPath).catch(() => {}),
+  )
 }
 
 /**

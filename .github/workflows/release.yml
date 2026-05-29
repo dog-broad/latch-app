@@ -1,0 +1,88 @@
+name: release
+
+# tag-driven release. push a `v*.*.*` tag and this workflow:
+#   1. builds the site from the tagged source.
+#   2. computes the sha256 of `dist/index.html`.
+#   3. creates a github release with the hash in the body so anyone
+#      can clone the same tag, run `pnpm install && pnpm build`, and
+#      verify their output matches.
+#   4. uploads `dist/index.html` as a release asset.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.2.2
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: build
+        run: pnpm build
+
+      - name: hash dist/index.html
+        id: hash
+        run: |
+          line=$(node scripts/hash-dist.mjs)
+          sum=$(echo "$line" | awk '{print $1}')
+          echo "sum=$sum" >> "$GITHUB_OUTPUT"
+          echo "line=$line" >> "$GITHUB_OUTPUT"
+          echo "computed: $line"
+
+      - name: write release body
+        id: body
+        run: |
+          tag="${GITHUB_REF##*/}"
+          {
+            echo "## ${tag}"
+            echo
+            echo "reproducible-build hash:"
+            echo
+            echo '```'
+            echo "${{ steps.hash.outputs.line }}"
+            echo '```'
+            echo
+            echo "verify:"
+            echo
+            echo '```sh'
+            echo "git clone https://github.com/${GITHUB_REPOSITORY}.git"
+            echo "cd $(basename "${GITHUB_REPOSITORY}")"
+            echo "git checkout ${tag}"
+            echo "pnpm install --frozen-lockfile"
+            echo "pnpm build"
+            echo "node scripts/hash-dist.mjs"
+            echo '```'
+            echo
+            echo "the printed line should match the one above. if it doesn't, don't trust the deployed page."
+          } > release-body.md
+
+      - name: create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF##*/}"
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes-file release-body.md \
+            dist/index.html

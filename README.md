@@ -29,13 +29,46 @@ a full threat model lives at the `/trust` route once the app is up.
 - chunked encryption for files (1 mib chunks, fresh iv each, chunk index in aad).
 - all crypto runs inside a web worker; the ui thread never sees key material.
 
-## status
+## build
 
-pre-scaffold. the static site, the crypto pipeline, and the firebase transport land in incremental commits on the `core` branch. build + run instructions arrive with the first scaffold commit.
+prerequisites: node 22, pnpm 11.
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build          # emits dist/
+pnpm preview        # serve dist/ on localhost
+```
+
+dev loop:
+
+```sh
+pnpm dev            # vite dev server with hmr
+pnpm test           # unit + integration
+pnpm test:rules     # firebase emulator-based rule tests (needs java 11+)
+```
 
 ## reproducible builds
 
-every tagged release publishes the sha256 of the deployed `index.html`. clone, build, hash, compare. if they don't match, don't trust the deployed page. verification instructions ship with the first release.
+`pnpm build` produces a byte-identical `dist/index.html` across runs and machines given the same source tree, node version, and pnpm version. every tagged release publishes the sha256 of that file. anyone can clone the matching tag, build locally, hash, and compare.
+
+```sh
+git clone https://github.com/dog-broad/latch-app.git
+cd latch-app
+git checkout v1.0.0   # any released tag
+pnpm install --frozen-lockfile
+pnpm build
+pnpm hash             # prints "<sha256>  dist/index.html"
+```
+
+the printed line should match the hash in the github release notes for that tag and the entry on `/changelog`. if they don't match — even one byte off — the deployed page contains something the source tree didn't, and you shouldn't trust it.
+
+verify the production page itself the same way:
+
+```sh
+curl -s https://latch.rushyendra.dev/ | sha256sum
+```
+
+the value should equal the released hash. (the cdn serves identical bytes; if it doesn't, the cdn is doing something we didn't ship.)
 
 ## license
 

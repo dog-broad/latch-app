@@ -5,3 +5,7 @@ allowBuilds:
   '@firebase/util': true
   esbuild: true
   protobufjs: true
+  # re2 is an optional native regex backend in firebase-tools — js regex
+  # fallback is fine. native compile would force a c++ toolchain on
+  # everyone who clones the repo. opt out.
+  re2: false

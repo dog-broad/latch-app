@@ -1,0 +1,30 @@
+{
+  "rules": {
+    "rooms": {
+      "$roomHash": {
+        ".validate": "$roomHash.matches(/^[0-9a-f]{16}$/)",
+
+        "clips": {
+          ".read": "auth != null",
+          ".indexOn": ["ts"],
+
+          "$clipId": {
+            ".write": "auth != null && (!data.exists() || !newData.exists())",
+
+            ".validate": "newData.hasChildren(['ts']) && newData.child('ts').isNumber() && ((newData.hasChild('payload') && newData.child('payload').isString() && newData.child('payload').val().length <= 524288 && !newData.hasChild('file')) || (newData.hasChild('file') && !newData.hasChild('payload') && newData.child('file').child('size').isNumber() && newData.child('file').child('size').val() <= 10485760)) && (!root.child('rooms').child($roomHash).child('presence').child(auth.uid).child('lastWriteTs').exists() || (now - root.child('rooms').child($roomHash).child('presence').child(auth.uid).child('lastWriteTs').val()) > 2000)"
+          }
+        },
+
+        "presence": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && $uid === auth.uid",
+            ".validate": "newData.hasChild('lastWriteTs') && newData.child('lastWriteTs').isNumber()"
+          }
+        },
+
+        "$other": { ".validate": false }
+      }
+    }
+  }
+}
