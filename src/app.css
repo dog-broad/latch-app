@@ -1,1 +1,87 @@
-/* tokens + tailwind utilities land in the next scaffold task */
+@import "tailwindcss";
+
+/* self-host JetBrains Mono — no google fonts cdn, no third-party font request.
+   weights: 400 (body), 500 (mid emphasis), 700 (headings + cta). */
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/700.css";
+
+@theme static {
+  /* `static` ships every declared token as a CSS variable on :root regardless
+     of whether a utility is using it yet. handwritten CSS — keyframes for the
+     cipher demo glow, focus-ring outlines, the new-item pulse — can reach for
+     any token via `var(--color-teal-bright)` and trust it to resolve. without
+     `static`, v4 tree-shakes unused vars off :root and only the tokens already
+     referenced in utility classes survive.
+
+     wipe tailwind's default tokens — only what's declared below is reachable
+     from a utility. an off-palette color (bg-red-500) or an off-scale size
+     (text-base, text-xl) becomes an unknown-utility build error, not a code
+     review nit. */
+  --color-*: initial;
+  --font-*: initial;
+  --text-*: initial;
+  --radius-*: initial;
+
+  /* palette — three teals do the work that a gradient would in a less
+     restrained design. anchored on warm-slate, not pure black. */
+  --color-bg: #0a1014;
+  --color-bg-lifted: #11181d;
+  --color-bg-sunk: #060a0d;
+
+  --color-fg: #e6e1cf;
+  --color-fg-muted: #7c8489;
+  --color-fg-faint: #4a5159;
+
+  --color-border: #1e3a3e;
+  --color-border-hot: #2d5a60;
+
+  --color-teal-deep: #0c4a4f;
+  --color-teal-mid: #159dad;
+  --color-teal-bright: #5fd4e0;
+
+  --color-success: #74a780;
+  --color-error: #e06c75;
+
+  /* single typeface. ui-monospace fallback handles the first paint before
+     the @fontsource woff2 lands. */
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* type scale — six discrete steps plus a display range. no clamp()
+     between steps; reactivity comes from picking the right step per
+     breakpoint. mono fonts render best at integer pixel sizes. */
+  --text-12: 0.75rem;
+  --text-14: 0.875rem;
+  --text-16: 1rem;
+  --text-24: 1.5rem;
+  --text-32: 2rem;
+  --text-48: 3rem;
+  --text-56: 3.5rem;
+  --text-64: 4rem;
+
+  /* geometry — sharp edges, minimal rounding. nothing above 4 px. */
+  --radius: 2px;
+  --radius-sharp: 0;
+}
+
+/* page defaults — set once, inherited everywhere. mono everywhere, warm
+   off-white on warm slate, line-height comfortable for body + code, no
+   tracking tweaks (mono has its own). dark color-scheme nudges native form
+   controls and scrollbars to render in their dark variants. */
+:root {
+  color-scheme: dark;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-16);
+  line-height: 1.5;
+  letter-spacing: 0;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
