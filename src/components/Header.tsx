@@ -1,3 +1,5 @@
+import { InstallButton } from '@/components/InstallButton'
+
 /**
  * top-of-page header. shared by every route. `◌ latch` lockup on the
  * left (the open-circle is the wordmark placeholder until the real
@@ -30,6 +32,7 @@ export function Header({ room }: { room?: string }) {
           </span>
         </a>
         <nav class="flex items-center gap-4 text-12 text-fg-muted">
+          <InstallButton />
           <a
             href="https://github.com/dog-broad/latch-app"
             target="_blank"
