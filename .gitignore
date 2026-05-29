@@ -39,3 +39,13 @@ page-*.jpeg
 # lighthouse local reports
 lh-report.json
 lighthouse-report.*
+
+# firebase
+.firebase
+firebase-debug.log*
+firestore-debug.log*
+database-debug.log*
+ui-debug.log*
+functions/lib
+functions/node_modules
+functions/.runtimeconfig.json

@@ -1,0 +1,7 @@
+# cloud-function package install lives in its own pnpm scope. the
+# parent latch-app/pnpm-workspace.yaml doesn't reach here — firebase
+# cli runs `npm install` inside this dir on deploy, and pnpm's status
+# checks need to agree about which postinstall scripts are allowed.
+allowBuilds:
+  '@firebase/util': true
+  protobufjs: true

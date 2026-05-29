@@ -75,6 +75,12 @@ export default defineConfig({
     globals: false,
     setupFiles: ['./src/test-setup.ts'],
     include: ['src/**/*.test.ts'],
+    // `*.emulator.test.ts` files need the firebase emulator suite
+    // running on their declared ports. the wrapper script
+    // (`pnpm test:rules`) boots emulators via `firebase emulators:exec`
+    // and points vitest at a separate include glob. excluding here
+    // keeps `pnpm test` runnable without external services.
+    exclude: ['node_modules/**', 'src/**/*.emulator.test.ts'],
     // argon2id derives at the spec parameters take ~400 ms each, and
     // a single test can derive multiple times. raise the default so
     // ci doesn't false-fail on cold-start wasm init.

@@ -1,0 +1,44 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // file chunks live at rooms/<16-hex>/files/<id>/chunks/<n>. nothing
+    // else is writable, and only authenticated clients can touch them.
+    // chunk size is bounded by firestore's native per-field cap; the
+    // client targets 1,048,400 bytes plaintext (encrypted: ~1,048,428).
+
+    match /rooms/{roomHash}/files/{fileId}/chunks/{chunkIndex} {
+      allow read: if request.auth != null
+        && roomHash.matches('^[0-9a-f]{16}$')
+        && chunkIndex.matches('^[0-9]+$')
+        && int(chunkIndex) >= 0
+        && int(chunkIndex) <= 10;
+
+      allow create: if request.auth != null
+        && roomHash.matches('^[0-9a-f]{16}$')
+        && chunkIndex.matches('^[0-9]+$')
+        && int(chunkIndex) >= 0
+        && int(chunkIndex) <= 10
+        && request.resource.data.keys().hasOnly(['payload'])
+        && request.resource.data.payload is bytes;
+
+      // chunks are immutable once written. trim happens via delete.
+      allow update: if false;
+
+      allow delete: if request.auth != null
+        && roomHash.matches('^[0-9a-f]{16}$');
+    }
+
+    // explicit deny on everything else under /rooms — keeps the surface
+    // tight even as the schema evolves.
+    match /rooms/{path=**} {
+      allow read, write: if false;
+    }
+
+    // and outside /rooms entirely.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
