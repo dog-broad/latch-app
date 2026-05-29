@@ -31,3 +31,7 @@ test-results
 
 # browser-tool artifacts (mcp screenshots, snapshots, console logs)
 .playwright-mcp
+screenshots/
+*.screenshot.png
+page-*.png
+page-*.jpeg
