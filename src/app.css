@@ -188,6 +188,24 @@ body {
   animation: glyph-pulse 1s ease-in-out infinite;
 }
 
+/* toast entry — rise 8px + fade over 200 ms (the "secondary state
+   change" timing). removal is instant; no exit animation to coordinate
+   against the store dropping it from the queue. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.toast-in {
+  animation: toast-in 200ms ease-out;
+}
+
 /* operator opted out of motion. replace the animated sweep with a
    flat teal-mid fill and let the static glyph row in the strip stand
    in for the cycling one — the demo's reactive bits (typing in the
@@ -207,6 +225,11 @@ body {
   }
 
   .glyph-pulse {
+    animation: none;
+  }
+
+  /* toasts appear/leave instantly — final frame, no rise/fade. */
+  .toast-in {
     animation: none;
   }
 }

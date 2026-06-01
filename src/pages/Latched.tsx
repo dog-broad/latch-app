@@ -5,6 +5,7 @@ import { getCurrentRoom } from '@/state/room'
 import { useRoomClips, type Clip, type FileClip as FileClipType, type TextClip } from '@/hooks/useRoomClips'
 import { encryptForRoom } from '@/crypto/client'
 import { publishClipToRoom, publishFileClipToRoom } from '@/firebase/clips'
+import { pushToast } from '@/state/toasts'
 import { highlightCode } from '@/clip/highlight'
 import { canFormat, formatCode } from '@/clip/format'
 import {
@@ -56,7 +57,6 @@ export function Latched() {
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
-  const [sendError, setSendError] = useState<string | null>(null)
   const [upload, setUpload] = useState<UploadProgress | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -87,6 +87,7 @@ export function Latched() {
     } catch (err) {
       console.error('stay-latched persistence failed:', err)
       setStayLatched(!next) // revert on error
+      pushToast('error', "couldn't save this room on the device")
     }
   }
 
@@ -129,14 +130,14 @@ export function Latched() {
     const text = draft.trim()
     if (!text || sending) return
     setSending(true)
-    setSendError(null)
     try {
       const plaintext = new TextEncoder().encode(text)
       const payload = await encryptForRoom(keyId, plaintext)
       await publishClipToRoom(roomPath, payload)
       setDraft('')
+      pushToast('success', 'sent')
     } catch (err) {
-      setSendError(err instanceof Error ? err.message : 'failed to send')
+      pushToast('error', err instanceof Error ? err.message : 'failed to send')
     } finally {
       setSending(false)
     }
@@ -145,11 +146,13 @@ export function Latched() {
   async function sendFile(file: File) {
     if (sending) return
     if (file.size > MAX_FILE_BYTES) {
-      setSendError(`file too large — ${formatSize(file.size)} exceeds the ${formatSize(MAX_FILE_BYTES)} cap`)
+      pushToast(
+        'error',
+        `file too large — ${formatSize(file.size)} exceeds the ${formatSize(MAX_FILE_BYTES)} cap`,
+      )
       return
     }
     setSending(true)
-    setSendError(null)
     setUpload({
       chunksUploaded: 0,
       chunkCount: Math.max(1, Math.ceil(file.size / (1024 * 1024))),
@@ -167,8 +170,9 @@ export function Latched() {
         chunkPathPrefix: meta.chunkPathPrefix,
         manifest: meta.manifest,
       })
+      pushToast('success', `sent · ${file.name}`)
     } catch (err) {
-      setSendError(err instanceof Error ? err.message : 'failed to send file')
+      pushToast('error', err instanceof Error ? err.message : 'failed to send file')
     } finally {
       setSending(false)
       setUpload(null)
@@ -320,9 +324,7 @@ export function Latched() {
               </div>
             )}
             <div class="flex items-center justify-between border-t border-border px-4 py-2 gap-3">
-              <span class="text-fg-muted text-12 flex-1 truncate" role={sendError ? 'alert' : undefined}>
-                {sendError ?? ''}
-              </span>
+              <span class="flex-1" aria-hidden="true" />
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
