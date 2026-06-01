@@ -204,6 +204,33 @@ export function Latched() {
     if (f) void sendFile(f)
   }
 
+  // an image or file on the clipboard pastes as a clip, routed through
+  // the same chunked-encryption pipeline as drag-and-drop. text-only
+  // clipboards fall through to the default paste (fills the textarea).
+  function handlePaste(e: ClipboardEvent) {
+    const data = e.clipboardData
+    if (!data) return
+    const direct = data.files.length > 0 ? data.files[0] : null
+    if (direct) {
+      e.preventDefault()
+      void sendFile(direct)
+      return
+    }
+    // some browsers populate items[] but not files[] for synthetic image
+    // copies (e.g. "copy image" from a page) — scan for a file-kind entry.
+    for (let i = 0; i < data.items.length; i++) {
+      const item = data.items[i]
+      if (item && item.kind === 'file') {
+        const f = item.getAsFile()
+        if (f) {
+          e.preventDefault()
+          void sendFile(f)
+          return
+        }
+      }
+    }
+  }
+
   const connecting = status === 'connecting'
   const reconnecting = status === 'reconnecting'
   const canSend = draft.trim().length > 0 && !sending && !connecting
@@ -304,6 +331,7 @@ export function Latched() {
               value={draft}
               onInput={(e) => setDraft(e.currentTarget.value)}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               disabled={sending || connecting}
               class="w-full bg-transparent text-fg text-14 placeholder:text-fg-faint p-4 outline-none focus:ring-2 focus:ring-teal-mid focus:ring-inset resize-none disabled:opacity-50"
             />
