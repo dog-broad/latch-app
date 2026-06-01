@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { useLocation } from 'preact-iso'
 import { Header } from '@/components/Header'
+import { useTabTitle } from '@/hooks/useTabTitle'
 import { getCurrentRoom } from '@/state/room'
 import { useRoomClips, type Clip, type FileClip as FileClipType, type TextClip } from '@/hooks/useRoomClips'
 import { encryptForRoom } from '@/crypto/client'
 import { publishClipToRoom, publishFileClipToRoom } from '@/firebase/clips'
+import { pushToast } from '@/state/toasts'
 import { highlightCode } from '@/clip/highlight'
 import { canFormat, formatCode } from '@/clip/format'
 import {
@@ -24,6 +26,7 @@ import {
 } from '@/state/remembered-rooms'
 import { RoomSwitcher } from '@/components/RoomSwitcher'
 import { QrShow } from '@/components/QrShow'
+import { Skeleton } from '@/components/Skeleton'
 
 function formatTime(ts: number): string {
   const ageMs = Date.now() - ts
@@ -49,19 +52,48 @@ export function Latched() {
   if (!room) return null
   const { keyId, roomPath, name, passphrase } = room
 
-  const clips = useRoomClips(keyId, roomPath)
+  const { status, clips, undecryptable } = useRoomClips(keyId, roomPath)
   const newest = clips[0]
   const earlier = clips.slice(1)
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
-  const [sendError, setSendError] = useState<string | null>(null)
   const [upload, setUpload] = useState<UploadProgress | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [toggles, setLocalToggles] = useState<AutoToggles>(() => getToggles(roomPath))
   const [stayLatched, setStayLatched] = useState(false)
   const recentlySeenRef = useRef<Set<string>>(new Set())
+
+  const notifyNewClip = useTabTitle(name)
+  const [pulsing, setPulsing] = useState(false)
+  const seenTopRef = useRef<string | null>(null)
+  const readySnapshotSeenRef = useRef(false)
+  const newestId = newest?.id ?? null
+
+  // reset the new-clip tracking when the room changes (the view can
+  // stay mounted across a room swap).
+  useEffect(() => {
+    readySnapshotSeenRef.current = false
+    seenTopRef.current = null
+  }, [roomPath])
+
+  // pulse the hero + flicker the title only for clips that arrive AFTER
+  // the initial snapshot. the first `ready` callback (room history, or
+  // an empty room) seeds the baseline without firing either.
+  useEffect(() => {
+    if (status !== 'ready') return
+    if (!readySnapshotSeenRef.current) {
+      readySnapshotSeenRef.current = true
+      seenTopRef.current = newestId
+      return
+    }
+    if (newestId !== null && newestId !== seenTopRef.current) {
+      seenTopRef.current = newestId
+      setPulsing(true)
+      notifyNewClip()
+    }
+  }, [newestId, status, notifyNewClip])
 
   // hydrate "stay latched" status on mount + refresh lastSeenAt if remembered
   useEffect(() => {
@@ -86,6 +118,7 @@ export function Latched() {
     } catch (err) {
       console.error('stay-latched persistence failed:', err)
       setStayLatched(!next) // revert on error
+      pushToast('error', "couldn't save this room on the device")
     }
   }
 
@@ -128,14 +161,14 @@ export function Latched() {
     const text = draft.trim()
     if (!text || sending) return
     setSending(true)
-    setSendError(null)
     try {
       const plaintext = new TextEncoder().encode(text)
       const payload = await encryptForRoom(keyId, plaintext)
       await publishClipToRoom(roomPath, payload)
       setDraft('')
+      pushToast('success', 'sent')
     } catch (err) {
-      setSendError(err instanceof Error ? err.message : 'failed to send')
+      pushToast('error', err instanceof Error ? err.message : 'failed to send')
     } finally {
       setSending(false)
     }
@@ -144,11 +177,13 @@ export function Latched() {
   async function sendFile(file: File) {
     if (sending) return
     if (file.size > MAX_FILE_BYTES) {
-      setSendError(`file too large — ${formatSize(file.size)} exceeds the ${formatSize(MAX_FILE_BYTES)} cap`)
+      pushToast(
+        'error',
+        `file too large — ${formatSize(file.size)} exceeds the ${formatSize(MAX_FILE_BYTES)} cap`,
+      )
       return
     }
     setSending(true)
-    setSendError(null)
     setUpload({
       chunksUploaded: 0,
       chunkCount: Math.max(1, Math.ceil(file.size / (1024 * 1024))),
@@ -166,8 +201,9 @@ export function Latched() {
         chunkPathPrefix: meta.chunkPathPrefix,
         manifest: meta.manifest,
       })
+      pushToast('success', `sent · ${file.name}`)
     } catch (err) {
-      setSendError(err instanceof Error ? err.message : 'failed to send file')
+      pushToast('error', err instanceof Error ? err.message : 'failed to send file')
     } finally {
       setSending(false)
       setUpload(null)
@@ -199,34 +235,83 @@ export function Latched() {
     if (f) void sendFile(f)
   }
 
-  const canSend = draft.trim().length > 0 && !sending
+  // an image or file on the clipboard pastes as a clip, routed through
+  // the same chunked-encryption pipeline as drag-and-drop. text-only
+  // clipboards fall through to the default paste (fills the textarea).
+  function handlePaste(e: ClipboardEvent) {
+    const data = e.clipboardData
+    if (!data) return
+    const direct = data.files.length > 0 ? data.files[0] : null
+    if (direct) {
+      e.preventDefault()
+      void sendFile(direct)
+      return
+    }
+    // some browsers populate items[] but not files[] for synthetic image
+    // copies (e.g. "copy image" from a page) — scan for a file-kind entry.
+    for (let i = 0; i < data.items.length; i++) {
+      const item = data.items[i]
+      if (item && item.kind === 'file') {
+        const f = item.getAsFile()
+        if (f) {
+          e.preventDefault()
+          void sendFile(f)
+          return
+        }
+      }
+    }
+  }
+
+  const connecting = status === 'connecting'
+  const reconnecting = status === 'reconnecting'
+  const canSend = draft.trim().length > 0 && !sending && !connecting
 
   return (
     <div class="min-h-screen flex flex-col bg-bg text-fg">
       <Header room={name} />
       <main class="flex-1 max-w-shell mx-auto w-full px-4 py-8 md:px-6 md:py-12">
-        <article class="border border-border bg-bg-lifted rounded p-6 md:p-8">
+        <article
+          class={`border border-border bg-bg-lifted rounded p-6 md:p-8 ${pulsing ? 'new-item-pulse' : ''}`}
+          onAnimationEnd={() => setPulsing(false)}
+        >
           <header class="flex flex-wrap items-center justify-between text-fg-muted text-12 gap-3">
-            <span class="truncate">latched · {name}</span>
+            <div class="flex items-center gap-3 min-w-0">
+              <span class="truncate">latched · {name}</span>
+              {reconnecting && (
+                <span class="text-error text-12 shrink-0" role="status">
+                  reconnecting…
+                </span>
+              )}
+            </div>
             <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <AutoToggle
-                enabled={toggles.autoWatch}
-                onClick={() => flipToggle('autoWatch')}
-                label="auto-watch"
-                tooltip="poll your clipboard and auto-send new copies to the room. needs clipboard read permission."
-              />
-              <AutoToggle
-                enabled={toggles.autoCopy}
-                onClick={() => flipToggle('autoCopy')}
-                label="auto-copy"
-                tooltip="write the newest clip to your clipboard when this tab regains focus. needs clipboard write permission."
-              />
-              <AutoToggle
-                enabled={stayLatched}
-                onClick={() => void flipStayLatched()}
-                label="stay latched"
-                tooltip="remember this room on this device. the passphrase is encrypted with a device-local key before it lands in indexeddb."
-              />
+              {connecting ? (
+                <>
+                  <Skeleton width="6rem" height="0.875rem" />
+                  <Skeleton width="5rem" height="0.875rem" />
+                  <Skeleton width="6rem" height="0.875rem" />
+                </>
+              ) : (
+                <>
+                  <AutoToggle
+                    enabled={toggles.autoWatch}
+                    onClick={() => flipToggle('autoWatch')}
+                    label="auto-watch"
+                    tooltip="poll your clipboard and auto-send new copies to the room. needs clipboard read permission."
+                  />
+                  <AutoToggle
+                    enabled={toggles.autoCopy}
+                    onClick={() => flipToggle('autoCopy')}
+                    label="auto-copy"
+                    tooltip="write the newest clip to your clipboard when this tab regains focus. needs clipboard write permission."
+                  />
+                  <AutoToggle
+                    enabled={stayLatched}
+                    onClick={() => void flipStayLatched()}
+                    label="stay latched"
+                    tooltip="remember this room on this device. the passphrase is encrypted with a device-local key before it lands in indexeddb."
+                  />
+                </>
+              )}
             </div>
           </header>
           <div class="mt-3 flex items-center justify-end gap-4">
@@ -234,7 +319,15 @@ export function Latched() {
             <RoomSwitcher currentRoomPath={roomPath} />
           </div>
           <div class="mt-8 md:mt-12 min-h-[6rem]">
-            {newest ? <HeroClip clip={newest} keyId={keyId} /> : <EmptyState />}
+            {connecting ? (
+              <HeroSkeleton />
+            ) : newest ? (
+              <HeroClip clip={newest} keyId={keyId} />
+            ) : undecryptable ? (
+              <UnreadableHint />
+            ) : (
+              <EmptyState />
+            )}
           </div>
         </article>
 
@@ -272,7 +365,8 @@ export function Latched() {
               value={draft}
               onInput={(e) => setDraft(e.currentTarget.value)}
               onKeyDown={handleKeyDown}
-              disabled={sending}
+              onPaste={handlePaste}
+              disabled={sending || connecting}
               class="w-full bg-transparent text-fg text-14 placeholder:text-fg-faint p-4 outline-none focus:ring-2 focus:ring-teal-mid focus:ring-inset resize-none disabled:opacity-50"
             />
             {upload && (
@@ -292,13 +386,11 @@ export function Latched() {
               </div>
             )}
             <div class="flex items-center justify-between border-t border-border px-4 py-2 gap-3">
-              <span class="text-fg-muted text-12 flex-1 truncate" role={sendError ? 'alert' : undefined}>
-                {sendError ?? ''}
-              </span>
+              <span class="flex-1" aria-hidden="true" />
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={sending}
+                disabled={sending || connecting}
                 aria-label="attach file"
                 class="text-fg-muted text-14 font-mono hover:text-teal-bright transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -329,6 +421,38 @@ export function Latched() {
 
 function EmptyState() {
   return <p class="text-fg-faint text-14">no clips yet. paste anything.</p>
+}
+
+/**
+ * shown while the room key is set but the first clip subscription
+ * hasn't returned — keeps the hero slot's height and signals motion so
+ * the connecting window doesn't read as an empty room.
+ */
+function HeroSkeleton() {
+  return (
+    <div class="space-y-3">
+      <Skeleton width="100%" height="1rem" />
+      <Skeleton width="75%" height="1rem" />
+      <Skeleton width="40%" height="0.75rem" class="mt-6" />
+    </div>
+  )
+}
+
+/**
+ * the room has clips but none decrypted under this key. this is NOT a
+ * wrong-passphrase case: the room path is derived from the passphrase
+ * too (see the crypto worker), so a wrong passphrase lands you in a
+ * different, empty room — you can never reach a populated path with the
+ * wrong key. the only way here is corrupted or tampered data at your
+ * real path (or a ~2^-64 path collision). aggregate signal only — we
+ * never say which clip failed (trust contract).
+ */
+function UnreadableHint() {
+  return (
+    <p class="text-fg-muted text-14">
+      can't read what's in here. the data looks corrupted or tampered.
+    </p>
+  )
 }
 
 function AutoToggle({

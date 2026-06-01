@@ -7,6 +7,7 @@ import { Privacy } from '@/pages/Privacy'
 import { Changelog } from '@/pages/Changelog'
 import { Source } from '@/pages/Source'
 import { NotFound } from '@/pages/NotFound'
+import { Toaster } from '@/components/Toaster'
 
 /**
  * client-side routing for the SPA. eager imports for now — the route
@@ -27,6 +28,7 @@ export function App() {
         <Route path="/source" component={Source} />
         <Route default component={NotFound} />
       </Router>
+      <Toaster />
     </LocationProvider>
   )
 }

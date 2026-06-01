@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'preact/hooks'
-import { subscribeToRoomClips, base64ToBytes, type FirebaseFileRef } from '@/firebase/clips'
+import {
+  subscribeToRoomClips,
+  subscribeToConnection,
+  base64ToBytes,
+  type FirebaseFileRef,
+} from '@/firebase/clips'
 import { decryptForRoom } from '@/crypto/client'
 import { detectClipKind, type ClipKind } from '@/clip/detect'
 import { decryptFileMetadata, type FileMetadata } from '@/clip/file-pipeline'
@@ -31,13 +36,48 @@ export type FileClip = {
 
 export type Clip = TextClip | FileClip
 
-export function useRoomClips(keyId: number, roomPath: string): readonly Clip[] {
+/**
+ * connection lifecycle for the room.
+ *
+ * - `connecting`: mounted, first clip callback not yet received.
+ * - `ready`: at least one clip callback has fired (even with zero clips).
+ * - `reconnecting`: the realtime-db socket dropped after we'd reached
+ *   `ready` — distinguishes a dead network mid-session from an empty
+ *   room. `.info/connected` reports false transiently during the
+ *   initial connect, so the flip to `reconnecting` is gated on having
+ *   reached `ready` once.
+ */
+export type RoomStatus = 'connecting' | 'ready' | 'reconnecting'
+
+export type RoomClipsState = {
+  readonly status: RoomStatus
+  readonly clips: readonly Clip[]
+  /**
+   * raw clips arrived but none decrypted — a room-level wrong-passphrase
+   * signal. aggregate-only by design: the trust contract says we never
+   * surface *which* clip failed, but "every clip in a non-empty room
+   * failed" is a safe room-level inference that leaks nothing per-clip.
+   */
+  readonly undecryptable: boolean
+}
+
+export function useRoomClips(keyId: number, roomPath: string): RoomClipsState {
   const [clips, setClips] = useState<readonly Clip[]>([])
+  const [ready, setReady] = useState(false)
+  const [connected, setConnected] = useState(true)
+  const [undecryptable, setUndecryptable] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     let unsubscribe: (() => void) | null = null
+    let unsubscribeConn: (() => void) | null = null
     const decoder = new TextDecoder()
+
+    // reset per-room: a room swap re-enters `connecting` cleanly.
+    setClips([])
+    setReady(false)
+    setConnected(true)
+    setUndecryptable(false)
 
     void (async () => {
       try {
@@ -75,8 +115,17 @@ export function useRoomClips(keyId: number, roomPath: string): readonly Clip[] {
           if (cancelled) return
           decrypted.sort((a, b) => b.ts - a.ts)
           setClips(decrypted)
+          setUndecryptable(raw.size > 0 && decrypted.length === 0)
+          setReady(true)
         })
-        if (cancelled) unsubscribe?.()
+        if (cancelled) {
+          unsubscribe?.()
+          return
+        }
+        unsubscribeConn = await subscribeToConnection((isConnected) => {
+          if (!cancelled) setConnected(isConnected)
+        })
+        if (cancelled) unsubscribeConn?.()
       } catch (err) {
         console.error('failed to subscribe to room clips:', err)
       }
@@ -85,10 +134,12 @@ export function useRoomClips(keyId: number, roomPath: string): readonly Clip[] {
     return () => {
       cancelled = true
       unsubscribe?.()
+      unsubscribeConn?.()
     }
   }, [keyId, roomPath])
 
-  return clips
+  const status: RoomStatus = !ready ? 'connecting' : connected ? 'ready' : 'reconnecting'
+  return { status, clips, undecryptable }
 }
 
 function firebaseRefToMeta(file: FirebaseFileRef): FileMetadata {

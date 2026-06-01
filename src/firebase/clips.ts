@@ -166,3 +166,27 @@ export async function subscribeToRoomClips(
     onUpdate(result)
   })
 }
+
+/**
+ * subscribe to the realtime database connection state via the built-in
+ * `.info/connected` path. fires `true` once the websocket is live and
+ * `false` whenever it drops — used to tell a mid-session network loss
+ * apart from an empty room. anonymous auth is awaited first so the
+ * subscription rides the same connection the clip listener uses.
+ */
+export async function subscribeToConnection(
+  onChange: (connected: boolean) => void,
+): Promise<Unsubscribe> {
+  const [{ getDatabase, ref, onValue }, { getFirebaseApp }, { getFirebaseAuth }] = await Promise.all([
+    import('firebase/database'),
+    import('./init'),
+    import('./auth'),
+  ])
+
+  await getFirebaseAuth()
+
+  const db = getDatabase(getFirebaseApp())
+  return onValue(ref(db, '.info/connected'), (snap) => {
+    onChange(snap.val() === true)
+  })
+}

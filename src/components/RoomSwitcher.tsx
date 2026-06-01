@@ -4,6 +4,7 @@ import { listRememberedRooms, recoverPassphrase, touchRoom, type RememberedRoom 
 import { setCurrentRoom } from '@/state/room'
 import { deriveRoomSalt } from '@/crypto/salt'
 import { deriveRoomKey } from '@/crypto/client'
+import { pushToast } from '@/state/toasts'
 
 /**
  * dropdown over the latched header that lists every "stay latched"
@@ -44,6 +45,7 @@ export function RoomSwitcher({ currentRoomPath }: { currentRoomPath: string }) {
       route('/latched')
     } catch (err) {
       console.error('failed to swap room:', err)
+      pushToast('error', `couldn't switch to ${room.name}`)
     } finally {
       setSwapping(null)
     }
