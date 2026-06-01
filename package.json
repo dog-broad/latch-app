@@ -19,13 +19,13 @@
     "@fontsource/jetbrains-mono": "^5.2.8",
     "firebase": "^12.13.0",
     "hash-wasm": "^4.12.0",
+    "highlight.js": "^11.11.1",
     "idb-keyval": "^6.2.4",
     "jsqr": "^1.4.0",
     "preact": "^10.22.0",
     "preact-iso": "^2.12.0",
     "prettier": "^3.8.3",
     "qrcode": "^1.5.4",
-    "shiki": "^4.1.0",
     "sql-formatter": "^15.8.0"
   },
   "devDependencies": {
