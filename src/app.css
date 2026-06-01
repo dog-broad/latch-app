@@ -206,6 +206,22 @@ body {
   animation: toast-in 200ms ease-out;
 }
 
+/* new-item pulse — when a fresh clip lands, the hero card gains a crisp
+   teal-bright ring that fades to nothing over 800 ms. no blur (sharp
+   edges over soft shadows); the one decorative glow the design allows. */
+@keyframes new-item-pulse {
+  0% {
+    box-shadow: 0 0 0 2px var(--color-teal-bright);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+
+.new-item-pulse {
+  animation: new-item-pulse 800ms ease-out;
+}
+
 /* operator opted out of motion. replace the animated sweep with a
    flat teal-mid fill and let the static glyph row in the strip stand
    in for the cycling one — the demo's reactive bits (typing in the
@@ -230,6 +246,11 @@ body {
 
   /* toasts appear/leave instantly — final frame, no rise/fade. */
   .toast-in {
+    animation: none;
+  }
+
+  /* no ring pulse; the clip still arrives, just without the flash. */
+  .new-item-pulse {
     animation: none;
   }
 }

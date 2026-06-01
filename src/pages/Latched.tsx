@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { useLocation } from 'preact-iso'
 import { Header } from '@/components/Header'
+import { useTabTitle } from '@/hooks/useTabTitle'
 import { getCurrentRoom } from '@/state/room'
 import { useRoomClips, type Clip, type FileClip as FileClipType, type TextClip } from '@/hooks/useRoomClips'
 import { encryptForRoom } from '@/crypto/client'
@@ -63,6 +64,36 @@ export function Latched() {
   const [toggles, setLocalToggles] = useState<AutoToggles>(() => getToggles(roomPath))
   const [stayLatched, setStayLatched] = useState(false)
   const recentlySeenRef = useRef<Set<string>>(new Set())
+
+  const notifyNewClip = useTabTitle(name)
+  const [pulsing, setPulsing] = useState(false)
+  const seenTopRef = useRef<string | null>(null)
+  const readySnapshotSeenRef = useRef(false)
+  const newestId = newest?.id ?? null
+
+  // reset the new-clip tracking when the room changes (the view can
+  // stay mounted across a room swap).
+  useEffect(() => {
+    readySnapshotSeenRef.current = false
+    seenTopRef.current = null
+  }, [roomPath])
+
+  // pulse the hero + flicker the title only for clips that arrive AFTER
+  // the initial snapshot. the first `ready` callback (room history, or
+  // an empty room) seeds the baseline without firing either.
+  useEffect(() => {
+    if (status !== 'ready') return
+    if (!readySnapshotSeenRef.current) {
+      readySnapshotSeenRef.current = true
+      seenTopRef.current = newestId
+      return
+    }
+    if (newestId !== null && newestId !== seenTopRef.current) {
+      seenTopRef.current = newestId
+      setPulsing(true)
+      notifyNewClip()
+    }
+  }, [newestId, status, notifyNewClip])
 
   // hydrate "stay latched" status on mount + refresh lastSeenAt if remembered
   useEffect(() => {
@@ -239,7 +270,10 @@ export function Latched() {
     <div class="min-h-screen flex flex-col bg-bg text-fg">
       <Header room={name} />
       <main class="flex-1 max-w-shell mx-auto w-full px-4 py-8 md:px-6 md:py-12">
-        <article class="border border-border bg-bg-lifted rounded p-6 md:p-8">
+        <article
+          class={`border border-border bg-bg-lifted rounded p-6 md:p-8 ${pulsing ? 'new-item-pulse' : ''}`}
+          onAnimationEnd={() => setPulsing(false)}
+        >
           <header class="flex flex-wrap items-center justify-between text-fg-muted text-12 gap-3">
             <div class="flex items-center gap-3 min-w-0">
               <span class="truncate">latched · {name}</span>
