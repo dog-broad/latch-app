@@ -121,6 +121,18 @@ export function RoomInput() {
       >
         join
       </button>
+      {submitting && (
+        <p
+          class="text-fg-muted text-12 mt-1 flex items-center gap-2"
+          role="status"
+          aria-live="polite"
+        >
+          <span class="glyph-pulse" aria-hidden="true">
+            ◌
+          </span>
+          deriving key…
+        </p>
+      )}
       {error !== null && (
         <p class="text-error text-12 mt-1" role="alert">
           {error}

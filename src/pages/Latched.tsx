@@ -24,6 +24,7 @@ import {
 } from '@/state/remembered-rooms'
 import { RoomSwitcher } from '@/components/RoomSwitcher'
 import { QrShow } from '@/components/QrShow'
+import { Skeleton } from '@/components/Skeleton'
 
 function formatTime(ts: number): string {
   const ageMs = Date.now() - ts
@@ -49,7 +50,7 @@ export function Latched() {
   if (!room) return null
   const { keyId, roomPath, name, passphrase } = room
 
-  const clips = useRoomClips(keyId, roomPath)
+  const { status, clips, undecryptable } = useRoomClips(keyId, roomPath)
   const newest = clips[0]
   const earlier = clips.slice(1)
 
@@ -199,7 +200,9 @@ export function Latched() {
     if (f) void sendFile(f)
   }
 
-  const canSend = draft.trim().length > 0 && !sending
+  const connecting = status === 'connecting'
+  const reconnecting = status === 'reconnecting'
+  const canSend = draft.trim().length > 0 && !sending && !connecting
 
   return (
     <div class="min-h-screen flex flex-col bg-bg text-fg">
@@ -207,26 +210,43 @@ export function Latched() {
       <main class="flex-1 max-w-shell mx-auto w-full px-4 py-8 md:px-6 md:py-12">
         <article class="border border-border bg-bg-lifted rounded p-6 md:p-8">
           <header class="flex flex-wrap items-center justify-between text-fg-muted text-12 gap-3">
-            <span class="truncate">latched · {name}</span>
+            <div class="flex items-center gap-3 min-w-0">
+              <span class="truncate">latched · {name}</span>
+              {reconnecting && (
+                <span class="text-error text-12 shrink-0" role="status">
+                  reconnecting…
+                </span>
+              )}
+            </div>
             <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <AutoToggle
-                enabled={toggles.autoWatch}
-                onClick={() => flipToggle('autoWatch')}
-                label="auto-watch"
-                tooltip="poll your clipboard and auto-send new copies to the room. needs clipboard read permission."
-              />
-              <AutoToggle
-                enabled={toggles.autoCopy}
-                onClick={() => flipToggle('autoCopy')}
-                label="auto-copy"
-                tooltip="write the newest clip to your clipboard when this tab regains focus. needs clipboard write permission."
-              />
-              <AutoToggle
-                enabled={stayLatched}
-                onClick={() => void flipStayLatched()}
-                label="stay latched"
-                tooltip="remember this room on this device. the passphrase is encrypted with a device-local key before it lands in indexeddb."
-              />
+              {connecting ? (
+                <>
+                  <Skeleton width="6rem" height="0.875rem" />
+                  <Skeleton width="5rem" height="0.875rem" />
+                  <Skeleton width="6rem" height="0.875rem" />
+                </>
+              ) : (
+                <>
+                  <AutoToggle
+                    enabled={toggles.autoWatch}
+                    onClick={() => flipToggle('autoWatch')}
+                    label="auto-watch"
+                    tooltip="poll your clipboard and auto-send new copies to the room. needs clipboard read permission."
+                  />
+                  <AutoToggle
+                    enabled={toggles.autoCopy}
+                    onClick={() => flipToggle('autoCopy')}
+                    label="auto-copy"
+                    tooltip="write the newest clip to your clipboard when this tab regains focus. needs clipboard write permission."
+                  />
+                  <AutoToggle
+                    enabled={stayLatched}
+                    onClick={() => void flipStayLatched()}
+                    label="stay latched"
+                    tooltip="remember this room on this device. the passphrase is encrypted with a device-local key before it lands in indexeddb."
+                  />
+                </>
+              )}
             </div>
           </header>
           <div class="mt-3 flex items-center justify-end gap-4">
@@ -234,7 +254,15 @@ export function Latched() {
             <RoomSwitcher currentRoomPath={roomPath} />
           </div>
           <div class="mt-8 md:mt-12 min-h-[6rem]">
-            {newest ? <HeroClip clip={newest} keyId={keyId} /> : <EmptyState />}
+            {connecting ? (
+              <HeroSkeleton />
+            ) : newest ? (
+              <HeroClip clip={newest} keyId={keyId} />
+            ) : undecryptable ? (
+              <WrongPassphraseHint />
+            ) : (
+              <EmptyState />
+            )}
           </div>
         </article>
 
@@ -272,7 +300,7 @@ export function Latched() {
               value={draft}
               onInput={(e) => setDraft(e.currentTarget.value)}
               onKeyDown={handleKeyDown}
-              disabled={sending}
+              disabled={sending || connecting}
               class="w-full bg-transparent text-fg text-14 placeholder:text-fg-faint p-4 outline-none focus:ring-2 focus:ring-teal-mid focus:ring-inset resize-none disabled:opacity-50"
             />
             {upload && (
@@ -298,7 +326,7 @@ export function Latched() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={sending}
+                disabled={sending || connecting}
                 aria-label="attach file"
                 class="text-fg-muted text-14 font-mono hover:text-teal-bright transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -329,6 +357,33 @@ export function Latched() {
 
 function EmptyState() {
   return <p class="text-fg-faint text-14">no clips yet. paste anything.</p>
+}
+
+/**
+ * shown while the room key is set but the first clip subscription
+ * hasn't returned — keeps the hero slot's height and signals motion so
+ * the connecting window doesn't read as an empty room.
+ */
+function HeroSkeleton() {
+  return (
+    <div class="space-y-3">
+      <Skeleton width="100%" height="1rem" />
+      <Skeleton width="75%" height="1rem" />
+      <Skeleton width="40%" height="0.75rem" class="mt-6" />
+    </div>
+  )
+}
+
+/**
+ * the room has clips but none decrypted under this key. aggregate
+ * signal only — we never say which clip failed (trust contract). the
+ * "?" keeps it an inference, not an accusation: tampered or malformed
+ * data would land here too.
+ */
+function WrongPassphraseHint() {
+  return (
+    <p class="text-fg-muted text-14">can't read anything in here. wrong passphrase?</p>
+  )
 }
 
 function AutoToggle({

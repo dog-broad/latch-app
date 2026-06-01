@@ -143,6 +143,51 @@ body {
   animation: glow-sweep 2.4s linear infinite;
 }
 
+/* skeleton placeholder shimmer. a teal-tinted highlight sweeps across a
+   sunk-background block while the room connects — distinguishes "still
+   loading" from "empty room". 1.4 s linear, same mechanical feel as the
+   cipher strip. */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -150% 0;
+  }
+  100% {
+    background-position: 250% 0;
+  }
+}
+
+.skeleton {
+  background-color: var(--color-bg-sunk);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 35%,
+    color-mix(in srgb, var(--color-teal-mid) 18%, transparent) 50%,
+    transparent 65%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: skeleton-shimmer 1.4s linear infinite;
+}
+
+/* the wordmark glyph (◌) pulses while the room key derives — argon2id
+   is a deliberate ~400-500 ms cost, and the pulse says "working, not
+   frozen" without a foreign spinner shape. */
+@keyframes glyph-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.glyph-pulse {
+  animation: glyph-pulse 1s ease-in-out infinite;
+}
+
 /* operator opted out of motion. replace the animated sweep with a
    flat teal-mid fill and let the static glyph row in the strip stand
    in for the cycling one — the demo's reactive bits (typing in the
@@ -153,5 +198,15 @@ body {
     animation: none;
     background-image: none;
     background-color: var(--color-teal-mid);
+  }
+
+  /* skeleton holds its final frame — a flat sunk block, no sweep. */
+  .skeleton {
+    animation: none;
+    background-image: none;
+  }
+
+  .glyph-pulse {
+    animation: none;
   }
 }
