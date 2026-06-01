@@ -260,6 +260,30 @@ body {
   animation: toast-in 200ms ease-out;
 }
 
+/* per-kind toast surface: a faint tint pushes it off the card
+   background, and one subtle outer glow (no offset) gives elevation
+   against the near-black page. early testers found the plain
+   bg-lifted + 1px border too faint to notice. class-based so it stays
+   inside `style-src 'self'` — an inline box-shadow would be dropped by
+   the csp. border-color is set here to pair with the utility border-2. */
+.toast-success {
+  border-color: var(--color-success);
+  background-color: color-mix(in srgb, var(--color-success) 10%, var(--color-bg-lifted));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--color-success) 30%, transparent);
+}
+
+.toast-error {
+  border-color: var(--color-error);
+  background-color: color-mix(in srgb, var(--color-error) 10%, var(--color-bg-lifted));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--color-error) 30%, transparent);
+}
+
+.toast-info {
+  border-color: var(--color-border-hot);
+  background-color: color-mix(in srgb, var(--color-teal-mid) 10%, var(--color-bg-lifted));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--color-teal-mid) 25%, transparent);
+}
+
 /* new-item pulse — when a fresh clip lands, the hero card gains a crisp
    teal-bright ring that fades to nothing over 800 ms. no blur (sharp
    edges over soft shadows); the one decorative glow the design allows. */
