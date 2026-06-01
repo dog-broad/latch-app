@@ -100,18 +100,72 @@ body {
   min-height: 100vh;
 }
 
-/* shiki output normalization. the syntax-highlighted block carries
-   its own background and padding from the github-dark theme;
-   stripping them lets the surrounding bg-bg-lifted card show through
-   and our own padding stay in charge of layout. wrapping rules
-   match the plain-text <pre> fallback so the swap is seamless. */
-.shiki-host .shiki {
-  background: transparent !important;
-  padding: 0 !important;
-  white-space: pre-wrap;
-  word-break: break-word;
+/* syntax-highlighting token palette. highlight.js emits class-only
+   markup (no inline styles — that's what keeps it inside the strict
+   `style-src 'self'` csp; see the highlight wrapper), so the colors
+   live here. mapped onto the latch palette rather than a stock theme:
+   teal-forward, warm fg, muted comments — code reads as part of the
+   page, not a foreign github-dark block. the `.hljs` base + wrapping
+   come from the host <pre>, which matches the plain-text fallback. */
+.hl-host .hljs {
+  background: transparent;
+  color: var(--color-fg);
+  display: block;
   overflow-x: auto;
-  margin: 0;
+}
+
+.hl-host .hljs-comment,
+.hl-host .hljs-quote {
+  color: var(--color-fg-faint);
+  font-style: italic;
+}
+
+.hl-host .hljs-keyword,
+.hl-host .hljs-selector-tag,
+.hl-host .hljs-built_in,
+.hl-host .hljs-name,
+.hl-host .hljs-tag {
+  color: var(--color-teal-bright);
+}
+
+.hl-host .hljs-string,
+.hl-host .hljs-regexp,
+.hl-host .hljs-symbol,
+.hl-host .hljs-bullet,
+.hl-host .hljs-addition {
+  color: var(--color-success);
+}
+
+.hl-host .hljs-number,
+.hl-host .hljs-literal,
+.hl-host .hljs-type,
+.hl-host .hljs-link {
+  color: var(--color-teal-mid);
+}
+
+.hl-host .hljs-title,
+.hl-host .hljs-section,
+.hl-host .hljs-attr,
+.hl-host .hljs-attribute,
+.hl-host .hljs-variable,
+.hl-host .hljs-template-variable {
+  color: var(--color-fg);
+}
+
+.hl-host .hljs-meta {
+  color: var(--color-fg-muted);
+}
+
+.hl-host .hljs-deletion {
+  color: var(--color-error);
+}
+
+.hl-host .hljs-emphasis {
+  font-style: italic;
+}
+
+.hl-host .hljs-strong {
+  font-weight: var(--font-weight-bold);
 }
 
 /* hero-demo cipher strip. a 2.4 s linear sweep moves a teal-bright

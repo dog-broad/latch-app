@@ -673,7 +673,8 @@ function CodeBlock({ code, language }: { code: string; language: string | null }
         const result = await highlightCode(displayed, language)
         if (!cancelled) setHtml(result)
       } catch {
-        // shiki failed or chunk fetch died; raw <pre> fallback keeps rendering
+        // highlighter chunk fetch died; raw <pre> fallback keeps rendering
+        if (!cancelled) setHtml(null)
       }
     })()
     return () => {
@@ -703,10 +704,9 @@ function CodeBlock({ code, language }: { code: string; language: string | null }
   return (
     <div>
       {html ? (
-        <div
-          class="shiki-host text-14 font-mono"
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+        <pre class="hl-host text-fg text-14 whitespace-pre-wrap break-words font-mono">
+          <code class="hljs" dangerouslySetInnerHTML={{ __html: html }} />
+        </pre>
       ) : (
         <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono">
           {displayed}
