@@ -324,7 +324,7 @@ export function Latched() {
             ) : newest ? (
               <HeroClip clip={newest} keyId={keyId} />
             ) : undecryptable ? (
-              <WrongPassphraseHint />
+              <UnreadableHint />
             ) : (
               <EmptyState />
             )}
@@ -439,14 +439,19 @@ function HeroSkeleton() {
 }
 
 /**
- * the room has clips but none decrypted under this key. aggregate
- * signal only — we never say which clip failed (trust contract). the
- * "?" keeps it an inference, not an accusation: tampered or malformed
- * data would land here too.
+ * the room has clips but none decrypted under this key. this is NOT a
+ * wrong-passphrase case: the room path is derived from the passphrase
+ * too (see the crypto worker), so a wrong passphrase lands you in a
+ * different, empty room — you can never reach a populated path with the
+ * wrong key. the only way here is corrupted or tampered data at your
+ * real path (or a ~2^-64 path collision). aggregate signal only — we
+ * never say which clip failed (trust contract).
  */
-function WrongPassphraseHint() {
+function UnreadableHint() {
   return (
-    <p class="text-fg-muted text-14">can't read anything in here. wrong passphrase?</p>
+    <p class="text-fg-muted text-14">
+      can't read what's in here. the data looks corrupted or tampered.
+    </p>
   )
 }
 
