@@ -27,6 +27,7 @@ import {
 import { RoomSwitcher } from '@/components/RoomSwitcher'
 import { QrShow } from '@/components/QrShow'
 import { Skeleton } from '@/components/Skeleton'
+import { CopyButton } from '@/components/CopyButton'
 
 function formatTime(ts: number): string {
   const ageMs = Date.now() - ts
@@ -490,6 +491,14 @@ function HeroClip({ clip, keyId }: { clip: Clip; keyId: number }) {
 }
 
 function HeroTextClip({ clip }: { clip: TextClip }) {
+  // code clips carry their own copy button (next to [ format ]), since
+  // it must copy the possibly-formatted text held in CodeBlock state.
+  const copyText =
+    clip.kind.type === 'json'
+      ? clip.kind.pretty
+      : clip.kind.type === 'url'
+        ? clip.kind.href
+        : clip.text
   return (
     <>
       <TextClipBody clip={clip} />
@@ -498,6 +507,12 @@ function HeroTextClip({ clip }: { clip: TextClip }) {
         <span>{clip.kind.type}</span>
         <span aria-hidden="true">·</span>
         <span>{formatTime(clip.ts)}</span>
+        {clip.kind.type !== 'code' && (
+          <>
+            <span aria-hidden="true">·</span>
+            <CopyButton text={copyText} />
+          </>
+        )}
       </div>
     </>
   )
@@ -617,7 +632,7 @@ function TextClipBody({ clip }: { clip: TextClip }) {
   }
   if (clip.kind.type === 'json') {
     return (
-      <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono">
+      <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono max-h-[60vh] overflow-y-auto">
         {clip.kind.pretty}
       </pre>
     )
@@ -626,7 +641,9 @@ function TextClipBody({ clip }: { clip: TextClip }) {
     return <CodeBlock code={clip.text} language={clip.kind.language} />
   }
   return (
-    <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono">{clip.text}</pre>
+    <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono max-h-[60vh] overflow-y-auto">
+      {clip.text}
+    </pre>
   )
 }
 
@@ -704,24 +721,27 @@ function CodeBlock({ code, language }: { code: string; language: string | null }
   return (
     <div>
       {html ? (
-        <pre class="hl-host text-fg text-14 whitespace-pre-wrap break-words font-mono">
+        <pre class="hl-host text-fg text-14 whitespace-pre-wrap break-words font-mono max-h-[60vh] overflow-y-auto">
           <code class="hljs" dangerouslySetInnerHTML={{ __html: html }} />
         </pre>
       ) : (
-        <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono">
+        <pre class="text-fg text-14 whitespace-pre-wrap break-words font-mono max-h-[60vh] overflow-y-auto">
           {displayed}
         </pre>
       )}
-      <button
-        type="button"
-        onClick={onFormat}
-        disabled={!formattable || formatting}
-        title={tooltip}
-        aria-label={tooltip}
-        class="mt-3 text-12 text-fg-muted font-mono hover:text-teal-bright transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-fg-muted"
-      >
-        [ {formatting ? 'formatting…' : 'format'} ]
-      </button>
+      <div class="mt-3 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={onFormat}
+          disabled={!formattable || formatting}
+          title={tooltip}
+          aria-label={tooltip}
+          class="text-12 text-fg-muted font-mono hover:text-teal-bright transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-fg-muted"
+        >
+          [ {formatting ? 'formatting…' : 'format'} ]
+        </button>
+        <CopyButton text={displayed} />
+      </div>
     </div>
   )
 }
