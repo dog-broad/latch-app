@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
@@ -8,19 +8,22 @@ import {
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing'
 import {
-  push,
-  ref,
-  serverTimestamp,
-  set,
-  update,
-} from 'firebase/database'
-import {
   Bytes,
-  doc,
-  setDoc,
+  collection,
   deleteDoc,
+  doc,
   getDoc,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  writeBatch,
 } from 'firebase/firestore'
+
+// the firestore instance the rules-testing context hands back; the
+// modular firestore functions accept it (see the chunk tests below).
+type RulesFirestore = ReturnType<
+  ReturnType<RulesTestEnvironment['authenticatedContext']>['firestore']
+>
 
 /**
  * security-rule tests. spun up against the firebase emulator suite
@@ -38,11 +41,6 @@ let env: RulesTestEnvironment
 beforeAll(async () => {
   env = await initializeTestEnvironment({
     projectId: 'demo-latch-rules',
-    database: {
-      host: '127.0.0.1',
-      port: 9000,
-      rules: readFileSync(resolve(__dirname, '../../database.rules.json'), 'utf8'),
-    },
     firestore: {
       host: '127.0.0.1',
       port: 8080,
@@ -56,135 +54,161 @@ afterAll(async () => {
 })
 
 beforeEach(async () => {
-  await env.clearDatabase()
   await env.clearFirestore()
 })
 
-describe('rtdb rules', () => {
+/**
+ * mirror the client's publish: a batch that creates the clip doc and
+ * stamps the writer's presence in the same commit, which the rate-limit
+ * rule requires via getAfter.
+ */
+function publishClip(
+  fs: RulesFirestore,
+  room: string,
+  uid: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  const clipRef = doc(collection(fs, `rooms/${room}/clips`))
+  const batch = writeBatch(fs)
+  batch.set(clipRef, data)
+  batch.set(doc(fs, `rooms/${room}/presence/${uid}`), { lastWriteTs: serverTimestamp() })
+  return batch.commit()
+}
+
+const FILE_REF = {
+  id: 'f',
+  encryptedName: 'n',
+  encryptedMime: 'm',
+  size: 1,
+  chunkCount: 1,
+  chunkPathPrefix: `rooms/${ROOM}/files/f/chunks`,
+  manifest: ['h'],
+}
+
+describe('firestore clip rules', () => {
   it('rejects unauthenticated reads', async () => {
-    const db = env.unauthenticatedContext().database()
-    await assertFails(set(ref(db, `rooms/${ROOM}/clips/x`), { ts: 1, payload: 'x' }))
+    const fs = env.unauthenticatedContext().firestore()
+    await assertFails(getDoc(doc(fs, `rooms/${ROOM}/clips/x`)))
   })
 
-  it('accepts an authed text clip write with presence stamp', async () => {
-    const ctx = env.authenticatedContext('uid-alice')
-    const db = ctx.database()
-    const clipKey = push(ref(db, `rooms/${ROOM}/clips`)).key
-    expect(clipKey).toBeTruthy()
+  it('accepts an authed text clip write with batched presence stamp', async () => {
+    const fs = env.authenticatedContext('uid-alice').firestore()
     await assertSucceeds(
-      update(ref(db), {
-        [`rooms/${ROOM}/clips/${clipKey}`]: { ts: serverTimestamp(), payload: 'hello' },
-        [`rooms/${ROOM}/presence/uid-alice/lastWriteTs`]: serverTimestamp(),
+      publishClip(fs, ROOM, 'uid-alice', {
+        ts: serverTimestamp(),
+        payload: Bytes.fromUint8Array(new Uint8Array([1, 2, 3])),
+      }),
+    )
+  })
+
+  it('rejects a clip write that does not also stamp presence', async () => {
+    const fs = env.authenticatedContext('uid-alice').firestore()
+    await assertFails(
+      setDoc(doc(collection(fs, `rooms/${ROOM}/clips`)), {
+        ts: serverTimestamp(),
+        payload: Bytes.fromUint8Array(new Uint8Array([1])),
       }),
     )
   })
 
   it('rejects a second clip write within 2s of the first', async () => {
-    const ctx = env.authenticatedContext('uid-alice')
-    const db = ctx.database()
-    const firstKey = push(ref(db, `rooms/${ROOM}/clips`)).key!
-    await update(ref(db), {
-      [`rooms/${ROOM}/clips/${firstKey}`]: { ts: serverTimestamp(), payload: 'one' },
-      [`rooms/${ROOM}/presence/uid-alice/lastWriteTs`]: serverTimestamp(),
+    const fs = env.authenticatedContext('uid-alice').firestore()
+    await publishClip(fs, ROOM, 'uid-alice', {
+      ts: serverTimestamp(),
+      payload: Bytes.fromUint8Array(new Uint8Array([1])),
     })
-
-    const secondKey = push(ref(db, `rooms/${ROOM}/clips`)).key!
     await assertFails(
-      update(ref(db), {
-        [`rooms/${ROOM}/clips/${secondKey}`]: { ts: serverTimestamp(), payload: 'two' },
-        [`rooms/${ROOM}/presence/uid-alice/lastWriteTs`]: serverTimestamp(),
+      publishClip(fs, ROOM, 'uid-alice', {
+        ts: serverTimestamp(),
+        payload: Bytes.fromUint8Array(new Uint8Array([2])),
       }),
     )
   })
 
   it('rejects malformed room hash', async () => {
-    const ctx = env.authenticatedContext('uid-alice')
-    const db = ctx.database()
-    const key = push(ref(db, `rooms/${BAD_ROOM}/clips`)).key!
+    const fs = env.authenticatedContext('uid-alice').firestore()
     await assertFails(
-      update(ref(db), {
-        [`rooms/${BAD_ROOM}/clips/${key}`]: { ts: serverTimestamp(), payload: 'x' },
-        [`rooms/${BAD_ROOM}/presence/uid-alice/lastWriteTs`]: serverTimestamp(),
+      publishClip(fs, BAD_ROOM, 'uid-alice', {
+        ts: serverTimestamp(),
+        payload: Bytes.fromUint8Array(new Uint8Array([1])),
       }),
     )
   })
 
   it('rejects a clip whose payload exceeds 512 KiB', async () => {
-    const ctx = env.authenticatedContext('uid-alice')
-    const db = ctx.database()
-    const key = push(ref(db, `rooms/${ROOM}/clips`)).key!
-    const oversize = 'x'.repeat(524289)
+    const fs = env.authenticatedContext('uid-alice').firestore()
     await assertFails(
-      update(ref(db), {
-        [`rooms/${ROOM}/clips/${key}`]: { ts: serverTimestamp(), payload: oversize },
-        [`rooms/${ROOM}/presence/uid-alice/lastWriteTs`]: serverTimestamp(),
+      publishClip(fs, ROOM, 'uid-alice', {
+        ts: serverTimestamp(),
+        payload: Bytes.fromUint8Array(new Uint8Array(524289)),
       }),
     )
   })
 
   it('rejects a clip with both payload and file fields', async () => {
-    const ctx = env.authenticatedContext('uid-alice')
-    const db = ctx.database()
-    const key = push(ref(db, `rooms/${ROOM}/clips`)).key!
+    const fs = env.authenticatedContext('uid-alice').firestore()
     await assertFails(
-      update(ref(db), {
-        [`rooms/${ROOM}/clips/${key}`]: {
-          ts: serverTimestamp(),
-          payload: 'x',
-          file: {
-            id: 'f',
-            encryptedName: 'n',
-            encryptedMime: 'm',
-            size: 1,
-            chunkCount: 1,
-            chunkPathPrefix: `rooms/${ROOM}/files/f/chunks`,
-            manifest: ['h'],
-          },
-        },
-        [`rooms/${ROOM}/presence/uid-alice/lastWriteTs`]: serverTimestamp(),
+      publishClip(fs, ROOM, 'uid-alice', {
+        ts: serverTimestamp(),
+        payload: Bytes.fromUint8Array(new Uint8Array([1])),
+        file: FILE_REF,
       }),
     )
   })
 
   it('rejects a file clip with size over 10 MB', async () => {
-    const ctx = env.authenticatedContext('uid-alice')
-    const db = ctx.database()
-    const key = push(ref(db, `rooms/${ROOM}/clips`)).key!
+    const fs = env.authenticatedContext('uid-alice').firestore()
     await assertFails(
-      update(ref(db), {
-        [`rooms/${ROOM}/clips/${key}`]: {
-          ts: serverTimestamp(),
-          file: {
-            id: 'f',
-            encryptedName: 'n',
-            encryptedMime: 'm',
-            size: 10485761,
-            chunkCount: 11,
-            chunkPathPrefix: `rooms/${ROOM}/files/f/chunks`,
-            manifest: ['h'],
-          },
-        },
-        [`rooms/${ROOM}/presence/uid-alice/lastWriteTs`]: serverTimestamp(),
+      publishClip(fs, ROOM, 'uid-alice', {
+        ts: serverTimestamp(),
+        file: { ...FILE_REF, size: 10485761, chunkCount: 11 },
       }),
     )
   })
 
-  it('rejects writing presence as a different uid', async () => {
-    const ctx = env.authenticatedContext('uid-alice')
-    const db = ctx.database()
-    await assertFails(
-      set(ref(db, `rooms/${ROOM}/presence/uid-bob/lastWriteTs`), serverTimestamp()),
+  it('accepts a file clip within the size cap', async () => {
+    const fs = env.authenticatedContext('uid-alice').firestore()
+    await assertSucceeds(
+      publishClip(fs, ROOM, 'uid-alice', { ts: serverTimestamp(), file: FILE_REF }),
     )
   })
 
-  it('rejects writes outside /rooms', async () => {
+  it('rejects writing presence as a different uid', async () => {
+    const fs = env.authenticatedContext('uid-alice').firestore()
+    await assertFails(
+      setDoc(doc(fs, `rooms/${ROOM}/presence/uid-bob`), { lastWriteTs: serverTimestamp() }),
+    )
+  })
+
+  it('rejects updating an existing clip (immutable)', async () => {
     const ctx = env.authenticatedContext('uid-alice')
-    const db = ctx.database()
-    await assertFails(set(ref(db, 'somewhere/else'), { x: 1 }))
+    const fs = ctx.firestore()
+    // seed a clip with rules disabled so the test isolates the update rule.
+    let clipPath = ''
+    await env.withSecurityRulesDisabled(async (admin) => {
+      const ref = doc(collection(admin.firestore(), `rooms/${ROOM}/clips`))
+      clipPath = ref.path
+      await setDoc(ref, { ts: serverTimestamp(), payload: Bytes.fromUint8Array(new Uint8Array([1])) })
+    })
+    await assertFails(
+      updateDoc(doc(fs, clipPath), { payload: Bytes.fromUint8Array(new Uint8Array([2])) }),
+    )
+  })
+
+  it('accepts an authed delete on a clip (prune)', async () => {
+    const ctx = env.authenticatedContext('uid-alice')
+    const fs = ctx.firestore()
+    let clipPath = ''
+    await env.withSecurityRulesDisabled(async (admin) => {
+      const ref = doc(collection(admin.firestore(), `rooms/${ROOM}/clips`))
+      clipPath = ref.path
+      await setDoc(ref, { ts: serverTimestamp(), payload: Bytes.fromUint8Array(new Uint8Array([1])) })
+    })
+    await assertSucceeds(deleteDoc(doc(fs, clipPath)))
   })
 })
 
-describe('firestore rules', () => {
+describe('firestore chunk rules', () => {
   it('accepts an authed chunk write at the right path', async () => {
     const ctx = env.authenticatedContext('uid-alice')
     const fs = ctx.firestore()

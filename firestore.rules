@@ -3,20 +3,78 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function isAuthed() {
+      return request.auth != null;
+    }
+
+    function hexRoom(roomHash) {
+      return roomHash.matches('^[0-9a-f]{16}$');
+    }
+
+    // the writer's presence doc, used for per-uid rate limiting.
+    function presenceRef(roomHash) {
+      return /databases/$(database)/documents/rooms/$(roomHash)/presence/$(request.auth.uid);
+    }
+
+    // rate limit: a clip write is only valid if the SAME commit also
+    // stamps the writer's presence doc to now (getAfter), and the
+    // previous stamp is older than 2s (get). that bounds a uid to one
+    // clip per 2s (~30/min) without an out-of-band counter. a non-
+    // existent presence doc means it's the first write — allowed.
+    function rateOk(roomHash) {
+      return getAfter(presenceRef(roomHash)).data.lastWriteTs == request.time
+        && (
+          !exists(presenceRef(roomHash))
+          || request.time > get(presenceRef(roomHash)).data.lastWriteTs + duration.value(2, 's')
+        );
+    }
+
+    // a clip is either a text payload (bytes, <=512KB) or a file
+    // metadata record (size <=10MB), never both. `ts` is a server
+    // timestamp, which the rules see as request.time.
+    function validClip(d) {
+      return d.ts == request.time
+        && (
+          (d.keys().hasOnly(['ts', 'payload']) && d.payload is bytes && d.payload.size() <= 524288)
+          || (d.keys().hasOnly(['ts', 'file']) && d.file.size is int && d.file.size <= 10485760)
+        );
+    }
+
+    // clips live at rooms/<16-hex>/clips/<auto-id>. create-only +
+    // delete (for prune); immutable once written.
+    match /rooms/{roomHash}/clips/{clipId} {
+      allow read: if isAuthed() && hexRoom(roomHash);
+      allow create: if isAuthed() && hexRoom(roomHash)
+        && validClip(request.resource.data)
+        && rateOk(roomHash);
+      allow update: if false;
+      allow delete: if isAuthed() && hexRoom(roomHash);
+    }
+
+    // presence holds only a server-stamped lastWriteTs, writable solely
+    // by its own uid. the timestamp must equal request.time so a client
+    // can't backdate it to dodge the rate limit.
+    match /rooms/{roomHash}/presence/{uid} {
+      allow read: if isAuthed() && hexRoom(roomHash);
+      allow write: if isAuthed() && hexRoom(roomHash)
+        && uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['lastWriteTs'])
+        && request.resource.data.lastWriteTs == request.time;
+    }
+
     // file chunks live at rooms/<16-hex>/files/<id>/chunks/<n>. nothing
     // else is writable, and only authenticated clients can touch them.
     // chunk size is bounded by firestore's native per-field cap; the
     // client targets 1,048,400 bytes plaintext (encrypted: ~1,048,428).
-
     match /rooms/{roomHash}/files/{fileId}/chunks/{chunkIndex} {
-      allow read: if request.auth != null
-        && roomHash.matches('^[0-9a-f]{16}$')
+      allow read: if isAuthed()
+        && hexRoom(roomHash)
         && chunkIndex.matches('^[0-9]+$')
         && int(chunkIndex) >= 0
         && int(chunkIndex) <= 10;
 
-      allow create: if request.auth != null
-        && roomHash.matches('^[0-9a-f]{16}$')
+      allow create: if isAuthed()
+        && hexRoom(roomHash)
         && chunkIndex.matches('^[0-9]+$')
         && int(chunkIndex) >= 0
         && int(chunkIndex) <= 10
@@ -26,8 +84,8 @@ service cloud.firestore {
       // chunks are immutable once written. trim happens via delete.
       allow update: if false;
 
-      allow delete: if request.auth != null
-        && roomHash.matches('^[0-9a-f]{16}$');
+      allow delete: if isAuthed()
+        && hexRoom(roomHash);
     }
 
     // explicit deny on everything else under /rooms — keeps the surface
