@@ -1,7 +1,6 @@
 import { initializeApp } from 'firebase-admin/app'
-import { getDatabase } from 'firebase-admin/database'
 import { getFirestore } from 'firebase-admin/firestore'
-import { onValueCreated } from 'firebase-functions/v2/database'
+import { onDocumentCreated } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions/v2'
 
 initializeApp()
@@ -10,12 +9,6 @@ type FileRef = {
   id: string
   chunkCount: number
   chunkPathPrefix: string
-}
-
-type Clip = {
-  ts: number
-  payload?: string
-  file?: FileRef
 }
 
 const MAX_CLIPS_PER_ROOM = 10
@@ -28,13 +21,13 @@ const MAX_CLIPS_PER_ROOM = 10
  * if the room is already at or below the cap, exits without touching
  * anything.
  *
- * runs idempotently — re-invocation against an already-trimmed room
- * is a no-op. concurrent writes that briefly push the room past the
- * cap converge on the next trigger.
+ * runs idempotently — re-invocation against an already-trimmed room is
+ * a no-op. concurrent writes that briefly push the room past the cap
+ * converge on the next trigger.
  */
-export const trimRoomClips = onValueCreated(
+export const trimRoomClips = onDocumentCreated(
   {
-    ref: '/rooms/{roomHash}/clips/{clipId}',
+    document: 'rooms/{roomHash}/clips/{clipId}',
     region: 'us-central1',
   },
   async (event) => {
@@ -44,48 +37,34 @@ export const trimRoomClips = onValueCreated(
       return
     }
 
-    const db = getDatabase()
-    const clipsRef = db.ref(`rooms/${roomHash}/clips`)
-    const snap = await clipsRef.orderByChild('ts').get()
-    if (!snap.exists()) return
+    const db = getFirestore()
+    const clipsRef = db.collection(`rooms/${roomHash}/clips`)
+    const snap = await clipsRef.orderBy('ts', 'desc').get()
+    if (snap.size <= MAX_CLIPS_PER_ROOM) return
 
-    const ordered: { key: string; clip: Clip }[] = []
-    snap.forEach((child) => {
-      const key = child.key
-      const val = child.val() as Clip | null
-      if (key && val && typeof val.ts === 'number') {
-        ordered.push({ key, clip: val })
-      }
-      return false
-    })
+    const stale = snap.docs.slice(MAX_CLIPS_PER_ROOM)
 
-    if (ordered.length <= MAX_CLIPS_PER_ROOM) return
+    const batch = db.batch()
+    for (const doc of stale) batch.delete(doc.ref)
+    await batch.commit()
 
-    ordered.sort((a, b) => a.clip.ts - b.clip.ts)
-    const stale = ordered.slice(0, ordered.length - MAX_CLIPS_PER_ROOM)
+    const fileRefs = stale
+      .map((doc) => (doc.data() as { file?: FileRef }).file)
+      .filter((file): file is FileRef => !!file)
+    if (fileRefs.length === 0) return
 
-    const updates: Record<string, null> = {}
-    for (const s of stale) updates[s.key] = null
-    await clipsRef.update(updates)
-
-    const fileClips = stale.filter((s) => s.clip.file)
-    if (fileClips.length === 0) return
-
-    const fs = getFirestore()
     await Promise.all(
-      fileClips.flatMap((s) => {
-        const file = s.clip.file
-        if (!file) return []
-        return Array.from({ length: file.chunkCount }, (_, i) =>
-          fs.doc(`${file.chunkPathPrefix}/${i}`).delete(),
-        )
-      }),
+      fileRefs.flatMap((file) =>
+        Array.from({ length: file.chunkCount }, (_, i) =>
+          db.doc(`${file.chunkPathPrefix}/${i}`).delete(),
+        ),
+      ),
     )
 
     logger.info('trimmed room', {
       roomHash,
       pruned: stale.length,
-      fileClipsCascaded: fileClips.length,
+      fileClipsCascaded: fileRefs.length,
     })
   },
 )

@@ -10,8 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:rules": "firebase emulators:exec --project demo-latch-rules --only database,firestore \"vitest run --config vitest.rules.config.ts\"",
-    "emulators": "firebase emulators:start --project demo-latch-rules --only auth,database,firestore",
+    "test:rules": "firebase emulators:exec --project demo-latch-rules --only firestore \"vitest run --config vitest.rules.config.ts\"",
+    "emulators": "firebase emulators:start --project demo-latch-rules --only auth,firestore",
     "hash": "node scripts/hash-dist.mjs",
     "preview:csp": "node scripts/serve-with-headers.mjs"
   },

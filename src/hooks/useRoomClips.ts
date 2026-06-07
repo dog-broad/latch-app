@@ -1,10 +1,5 @@
 import { useEffect, useState } from 'preact/hooks'
-import {
-  subscribeToRoomClips,
-  subscribeToConnection,
-  base64ToBytes,
-  type FirebaseFileRef,
-} from '@/firebase/clips'
+import { subscribeToRoomClips, type FirebaseFileRef } from '@/firebase/clips'
 import { decryptForRoom } from '@/crypto/client'
 import { detectClipKind, type ClipKind } from '@/clip/detect'
 import { decryptFileMetadata, type FileMetadata } from '@/clip/file-pipeline'
@@ -39,13 +34,14 @@ export type Clip = TextClip | FileClip
 /**
  * connection lifecycle for the room.
  *
- * - `connecting`: mounted, first clip callback not yet received.
- * - `ready`: at least one clip callback has fired (even with zero clips).
- * - `reconnecting`: the realtime-db socket dropped after we'd reached
- *   `ready` — distinguishes a dead network mid-session from an empty
- *   room. `.info/connected` reports false transiently during the
- *   initial connect, so the flip to `reconnecting` is gated on having
- *   reached `ready` once.
+ * - `connecting`: mounted, no server-confirmed snapshot yet.
+ * - `ready`: a server-confirmed snapshot has arrived (even with zero
+ *   clips) — firestore reports `metadata.fromCache === false`.
+ * - `reconnecting`: a later snapshot came back from cache
+ *   (`fromCache === true`) after we'd reached `ready` — distinguishes a
+ *   dead network mid-session from an empty room. the flip is gated on
+ *   having reached `ready` once, so the cache-first frames during the
+ *   initial connect read as `connecting`, not `reconnecting`.
  */
 export type RoomStatus = 'connecting' | 'ready' | 'reconnecting'
 
@@ -70,7 +66,6 @@ export function useRoomClips(keyId: number, roomPath: string): RoomClipsState {
   useEffect(() => {
     let cancelled = false
     let unsubscribe: (() => void) | null = null
-    let unsubscribeConn: (() => void) | null = null
     const decoder = new TextDecoder()
 
     // reset per-room: a room swap re-enters `connecting` cleanly.
@@ -81,12 +76,12 @@ export function useRoomClips(keyId: number, roomPath: string): RoomClipsState {
 
     void (async () => {
       try {
-        unsubscribe = await subscribeToRoomClips(roomPath, async (raw) => {
+        unsubscribe = await subscribeToRoomClips(roomPath, async ({ clips: raw, fromCache, hasPendingWrites }) => {
           const decrypted: Clip[] = []
           for (const [id, c] of raw) {
             try {
               if ('payload' in c) {
-                const plaintext = await decryptForRoom(keyId, base64ToBytes(c.payload))
+                const plaintext = await decryptForRoom(keyId, c.payload)
                 const text = decoder.decode(plaintext)
                 decrypted.push({
                   type: 'text',
@@ -116,16 +111,14 @@ export function useRoomClips(keyId: number, roomPath: string): RoomClipsState {
           decrypted.sort((a, b) => b.ts - a.ts)
           setClips(decrypted)
           setUndecryptable(raw.size > 0 && decrypted.length === 0)
-          setReady(true)
+          // a server-confirmed snapshot (`!fromCache`) means we're synced
+          // and ready. a cache-only frame reads as disconnected UNLESS it's
+          // just the optimistic echo of our own pending write — that stays
+          // connected so a normal send doesn't flicker the reconnecting chip.
+          setConnected(!fromCache || hasPendingWrites)
+          if (!fromCache) setReady(true)
         })
-        if (cancelled) {
-          unsubscribe?.()
-          return
-        }
-        unsubscribeConn = await subscribeToConnection((isConnected) => {
-          if (!cancelled) setConnected(isConnected)
-        })
-        if (cancelled) unsubscribeConn?.()
+        if (cancelled) unsubscribe?.()
       } catch (err) {
         console.error('failed to subscribe to room clips:', err)
       }
@@ -134,7 +127,6 @@ export function useRoomClips(keyId: number, roomPath: string): RoomClipsState {
     return () => {
       cancelled = true
       unsubscribe?.()
-      unsubscribeConn?.()
     }
   }, [keyId, roomPath])
 
