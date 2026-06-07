@@ -67,7 +67,6 @@ export function Trust() {
           <li>
             exactly two outbound connection categories. firebase, enumerated
             in csp <span class="font-mono text-fg-muted text-14">connect-src</span> as{' '}
-            <span class="font-mono text-fg-muted text-14">*.firebaseio.com</span>,{' '}
             <span class="font-mono text-fg-muted text-14">firestore.googleapis.com</span>,{' '}
             <span class="font-mono text-fg-muted text-14">identitytoolkit.googleapis.com</span>,{' '}
             <span class="font-mono text-fg-muted text-14">securetoken.googleapis.com</span>,{' '}

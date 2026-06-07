@@ -23,9 +23,10 @@ export function About() {
         </p>
 
         <p class="mt-6 text-fg text-16 leading-normal">
-          latch rides google's domain reputation. <span class="font-mono text-fg-muted">*.firebaseio.com</span>{' '}
-          and <span class="font-mono text-fg-muted">*.googleapis.com</span> stay
-          reachable on every locked-down network because too much enterprise
+          latch rides google's domain reputation.{' '}
+          <span class="font-mono text-fg-muted">firestore.googleapis.com</span> and the
+          other <span class="font-mono text-fg-muted">*.googleapis.com</span> endpoints
+          stay reachable on every locked-down network because too much enterprise
           software depends on them — gmail, drive, calendar, third-party sso.
           latch borrows that reachability without trusting firebase with your
           content.
