@@ -10,7 +10,11 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      injectRegister: 'auto',
+      // no injected `registerSW.js` — that separate script is rewritten to
+      // HTML by some corporate proxies, and an inline register would violate
+      // `script-src 'self'`. we register the sw from our own bundle in
+      // main.tsx instead (same-origin, and failures are swallowed).
+      injectRegister: false,
       includeAssets: ['icon.svg', 'apple-touch-icon.png', 'favicon.png'],
       manifest: {
         name: 'latch',
@@ -62,13 +66,6 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
-  },
-  worker: {
-    // the crypto worker does `await import('hash-wasm')` for the argon2id
-    // wasm chunk; that's code-splitting inside the worker, which only
-    // works with the esm output format. vite's default `iife` rejects
-    // multi-chunk worker builds, so opt the worker pipeline into esm.
-    format: 'es',
   },
   test: {
     environment: 'node',

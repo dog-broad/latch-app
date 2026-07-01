@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
 import type { CryptoRequest, CryptoResponse } from './protocol'
-import type { argon2id as Argon2idFn } from 'hash-wasm'
+import { argon2id } from 'hash-wasm'
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope
 
@@ -40,12 +40,14 @@ async function handle(req: CryptoRequest): Promise<CryptoResponse> {
   throw new Error(`unhandled crypto request kind: ${JSON.stringify(_exhaustive)}`)
 }
 
-// argon2id is lazy-imported on first derive so the wasm module never
-// loads on first paint — the landing page sees it only when a user
-// joins a room. derived material stays in `keyMaterial`, indexed by
-// an opaque handle; the aes-gcm key is non-extractable and the raw
-// argon2id output is discarded once hkdf has split it.
-let argon2id: typeof Argon2idFn | null = null
+// hash-wasm is statically imported and bundled into this worker (its
+// wasm ships as base64 inside the js, so there's no separate .wasm
+// fetch). the whole worker is then inlined as a blob at the call site,
+// so no crypto asset is ever fetched over the network as a separate
+// url — nothing for a hostile corporate proxy to rewrite. derived
+// material stays in `keyMaterial`, indexed by an opaque handle; the
+// aes-gcm key is non-extractable and the raw argon2id output is
+// discarded once hkdf has split it.
 let nextKeyId = 1
 
 type RoomMaterial = {
@@ -62,9 +64,6 @@ const EMPTY_SALT = new Uint8Array(0)
 async function derive(
   req: Extract<CryptoRequest, { kind: 'derive' }>,
 ): Promise<CryptoResponse> {
-  if (!argon2id) {
-    argon2id = (await import('hash-wasm')).argon2id
-  }
   const t0 = performance.now()
   // argon2id parameters: 64 MiB memory, 3 iterations, 4 parallelism,
   // 32-byte output. memory-hard against gpu brute force — passphrases
