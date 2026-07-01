@@ -1,0 +1,41 @@
+# latch deploys to netlify as a mirror alongside vercel. this file is the
+# netlify equivalent of vercel.json: it must reproduce the exact security
+# headers + CSP, because netlify ignores vercel.json and would otherwise
+# serve the app with no policy at all.
+
+[build]
+  command = "pnpm build"
+  publish = "dist"
+
+[build.environment]
+  # match the release build's node line so the output stays reproducible.
+  NODE_VERSION = "22"
+
+# never let netlify post-process the output. asset optimization minifies and
+# rewrites html/css/js (and can inline styles), which would both break the
+# reproducible-build hash and violate `style-src 'self'` / `script-src 'self'`.
+# the deployed files must be byte-identical to `pnpm build`.
+[build.processing]
+  skip_processing = true
+
+# single-page app: any path with no matching file serves index.html and the
+# client router takes over. status 200 is a rewrite (url preserved), not a
+# redirect. netlify serves real static files first, so hashed assets are
+# unaffected.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# security headers — identical to vercel.json, applied to every response.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "no-referrer"
+    Permissions-Policy = "camera=(self), microphone=(), geolocation=(), browsing-topics=(), interest-cohort=(), clipboard-read=(self), clipboard-write=(self)"
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Resource-Policy = "same-origin"
+    Content-Security-Policy = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firebaseinstallations.googleapis.com; worker-src 'self' blob:; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests"
