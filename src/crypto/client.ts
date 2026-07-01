@@ -18,29 +18,40 @@ type Pending = {
   reject: (error: Error) => void
 }
 
-let worker: Worker | null = null
+let workerPromise: Promise<Worker> | null = null
 let nextId = 1
 const pending = new Map<number, Pending>()
 
-function getWorker(): Worker {
-  if (worker) return worker
-  // `new URL(..., import.meta.url)` is the form vite statically analyzes
-  // to emit the worker as its own chunk. lazy on first call — the
-  // import-graph reference is here, but the chunk fetch waits for need.
-  worker = new Worker(new URL('../crypto/worker.ts', import.meta.url), { type: 'module' })
-  worker.onmessage = (event: MessageEvent<CryptoResponse>) => {
-    const res = event.data
-    const slot = pending.get(res.id)
-    if (!slot) return
-    pending.delete(res.id)
-    slot.resolve(res)
-  }
-  worker.onerror = (event) => {
-    const err = new Error(`crypto worker error: ${event.message || 'unknown'}`)
-    for (const slot of pending.values()) slot.reject(err)
-    pending.clear()
-  }
-  return worker
+/**
+ * lazily import + spawn the crypto worker. the worker (with its inlined
+ * hash-wasm) lives in `worker-host`, imported dynamically so its weight
+ * lands in a room-join chunk, not first paint. cached as a promise; a
+ * failed load clears the cache so a later call can retry.
+ */
+function getWorker(): Promise<Worker> {
+  if (workerPromise) return workerPromise
+  workerPromise = import('./worker-host')
+    .then(({ createCryptoWorker }) => {
+      const w = createCryptoWorker()
+      w.onmessage = (event: MessageEvent<CryptoResponse>) => {
+        const res = event.data
+        const slot = pending.get(res.id)
+        if (!slot) return
+        pending.delete(res.id)
+        slot.resolve(res)
+      }
+      w.onerror = (event) => {
+        const err = new Error(`crypto worker error: ${event.message || 'unknown'}`)
+        for (const slot of pending.values()) slot.reject(err)
+        pending.clear()
+      }
+      return w
+    })
+    .catch((err) => {
+      workerPromise = null
+      throw err
+    })
+  return workerPromise
 }
 
 /**
@@ -50,11 +61,11 @@ function getWorker(): Worker {
  * distribute across discriminated unions — `Omit<...>` would collapse
  * to the intersection of fields and drop everything kind-specific.
  */
-function request<K extends CryptoRequest['kind']>(
+async function request<K extends CryptoRequest['kind']>(
   kind: K,
   payload: Omit<Extract<CryptoRequest, { kind: K }>, 'kind' | 'id'>,
 ): Promise<Extract<CryptoResponse, { kind: K }>> {
-  const w = getWorker()
+  const w = await getWorker()
   const id = nextId++
   return new Promise<Extract<CryptoResponse, { kind: K }>>((resolve, reject) => {
     pending.set(id, {
